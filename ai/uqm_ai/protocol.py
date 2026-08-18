@@ -91,6 +91,7 @@ class ConverseRequest:
     visits: int = 0
     available_knowledge: tuple[str, ...] = ()
     memory: tuple[str, ...] = ()
+    spoken_refs: tuple[int, ...] = ()
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> ConverseRequest:
@@ -120,6 +121,7 @@ class ConverseRequest:
         visits = int(raw.get("visits", context.get("visits", 0)))
         knowledge = raw.get("available_knowledge", context.get("available_knowledge", ()))
         memory = raw.get("memory", context.get("memory", ()))
+        spoken = tuple(int(r) for r in raw.get("spoken_refs", ()) if isinstance(r, int))
         try:
             request_id = int(raw["id"])
         except (KeyError, TypeError, ValueError) as exc:
@@ -133,6 +135,7 @@ class ConverseRequest:
             visits=visits,
             available_knowledge=tuple(knowledge),
             memory=tuple(memory),
+            spoken_refs=spoken,
         )
 
     def action_refs(self) -> frozenset[int]:
@@ -154,6 +157,7 @@ class ConverseRequest:
             visits=self.visits,
             available_knowledge=self.available_knowledge,
             memory=self.memory,
+            spoken_refs=self.spoken_refs,
         )
 
 

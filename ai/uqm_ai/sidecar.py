@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 from typing import IO
 
+from .pagination import paginate
 from .persona import PromptBuilder
 from .protocol import (
     PROTOCOL_VERSION,
@@ -93,8 +94,18 @@ class Sidecar:
         # the provider can reason about names.
         request = request.with_resolved_keys(self._builder.key_for_ref)
 
+        # The game reports which canonical phrases the character has actually
+        # spoken. Those are what he may draw on: he can repeat and elaborate
+        # on his own words, but cannot volunteer canon he has not reached.
+        spoken_keys = tuple(
+            key
+            for key in (self._builder.key_for_ref(ref) for ref in request.spoken_refs)
+            if key is not None
+        )
+        permitted = request.available_knowledge or spoken_keys
+
         prompt = self._builder.render(
-            permitted_keys=request.available_knowledge,
+            permitted_keys=permitted,
             memory=request.memory,
             visits=request.visits,
         )
@@ -108,7 +119,11 @@ class Sidecar:
         for note in validator.rejections:
             self._warn(f"request {request.id}: {note}")
 
-        return response.to_json()
+        # Break the prose into subtitle pages. The game pages on newlines and
+        # times each page itself; one long line overflows the subtitle box.
+        payload = response.to_json()
+        payload["spoken_text"] = paginate(payload["spoken_text"])
+        return payload
 
     def _send(self, payload: dict) -> None:
         self._out.write(encode_line(payload) + "\n")

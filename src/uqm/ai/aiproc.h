@@ -25,8 +25,17 @@ void AiProc_Kill (void);
 /* Writes exactly len bytes. Returns 1 on success. */
 int AiProc_Write (const char *data, size_t len);
 
+/* Called repeatedly while blocked waiting for a reply.
+ *
+ * Generation takes tens of seconds, during which the game would otherwise
+ * be frozen. The callback lets the caller keep the screen alive without
+ * this file needing to know anything about UQM. */
+typedef void (*AiProc_WaitFn) (void);
+
 /* Reads one newline-terminated line, waiting at most timeoutMs.
- * The newline is not stored. Returns 1 on success, 0 on timeout or EOF. */
-int AiProc_ReadLine (char *buf, size_t cap, int timeoutMs);
+ * The newline is not stored. onWait may be NULL.
+ * Returns 1 on success, 0 on timeout or EOF. */
+int AiProc_ReadLine (char *buf, size_t cap, int timeoutMs,
+		AiProc_WaitFn onWait);
 
 #endif /* UQM_AI_AIPROC_H */

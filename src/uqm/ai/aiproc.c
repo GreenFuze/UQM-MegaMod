@@ -123,7 +123,8 @@ AiProc_Write (const char *data, size_t len)
 }
 
 int
-AiProc_ReadLine (char *buf, size_t cap, int timeoutMs)
+AiProc_ReadLine (char *buf, size_t cap, int timeoutMs,
+		AiProc_WaitFn onWait)
 {
 	size_t n = 0;
 	int waited = 0;
@@ -145,6 +146,8 @@ AiProc_ReadLine (char *buf, size_t cap, int timeoutMs)
 			 * game indefinitely. */
 			if (waited >= timeoutMs)
 				return 0;
+			if (onWait != NULL)
+				onWait ();
 			Sleep (10);
 			waited += 10;
 			continue;
@@ -279,9 +282,12 @@ AiProc_Write (const char *data, size_t len)
 }
 
 int
-AiProc_ReadLine (char *buf, size_t cap, int timeoutMs)
+AiProc_ReadLine (char *buf, size_t cap, int timeoutMs,
+		AiProc_WaitFn onWait)
 {
 	size_t n = 0;
+	int waited = 0;
+	int ready;
 
 	if (fromChild < 0)
 		return 0;
@@ -295,11 +301,22 @@ AiProc_ReadLine (char *buf, size_t cap, int timeoutMs)
 
 		FD_ZERO (&rd);
 		FD_SET (fromChild, &rd);
-		tv.tv_sec = timeoutMs / 1000;
-		tv.tv_usec = (timeoutMs % 1000) * 1000;
+		/* Short slices so onWait runs regularly rather than once at the end. */
+		tv.tv_sec = 0;
+		tv.tv_usec = 10000;
 
-		if (select (fromChild + 1, &rd, NULL, NULL, &tv) <= 0)
+		ready = select (fromChild + 1, &rd, NULL, NULL, &tv);
+		if (ready < 0)
 			return 0;
+		if (ready == 0)
+		{
+			if (waited >= timeoutMs)
+				return 0;
+			if (onWait != NULL)
+				onWait ();
+			waited += 10;
+			continue;
+		}
 
 		got = read (fromChild, &c, 1);
 		if (got <= 0)

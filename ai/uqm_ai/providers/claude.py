@@ -30,10 +30,13 @@ except ImportError:  # pragma: no cover - exercised only on installs without it
 
 
 _RESPONSE_FORMAT = """
-Reply with ONLY a JSON object, no prose around it, no code fence:
+Reply with ONLY a JSON object, no prose around it, no code fence. Fill the
+fields IN THIS ORDER - decide before you write, or you will drift into
+speaking and forget to act:
 
-{"spoken_text": "<what you say, first person, in character>",
- "action": <ref number or null>,
+{"considering": "<one short line: does this exchange match a listed ref? which one, and are you willing?>",
+ "action": <the ref number, or null>,
+ "spoken_text": "<what you say, first person, in character>",
  "remember": "<one short line worth recalling next time, or null>"}
 """.strip()
 
@@ -105,14 +108,16 @@ class ClaudeProvider(LLMProvider):
             lines.append(f'  {action.ref} = the captain means: "{action.text}"{ending}')
         lines.append("")
         lines.append(
-            "Set action ONLY to a ref that genuinely means the same thing the "
-            "captain just said. A wrong match is far worse than none: it puts "
-            "words in the captain's mouth that they did not say. If nothing "
-            "fits, use null and simply talk - that is a normal, common and "
-            "correct outcome. Being unwilling is also a choice you may make, "
-            "and you should say so in character."
+            "Set action to the ref that best represents what has just happened "
+            "in this exchange - either because the captain effectively said "
+            "that line, or because you have DECIDED to go along with it. If "
+            "you agree to something, you must set the matching ref; saying yes "
+            "in words alone changes nothing and the moment is lost."
         )
-        lines.append("")
+        lines.append(
+            "Use null when nothing on the list reflects the exchange, or when "
+            "you are refusing. Refusing is a real choice - say so in character."
+        )
         lines.append(
             "Say only what you actually know. Do not invent Spathi history, "
             "names, places or events that were not given to you above. If you "

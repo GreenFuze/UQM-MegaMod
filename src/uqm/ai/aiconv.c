@@ -28,6 +28,38 @@
 static BOOLEAN aiActive = FALSE;
 static BOOLEAN aiSuppressPhrases = FALSE;
 static int aiNextRequestId = 1;
+static AiProc_WaitFn aiWaitFn = NULL;
+
+#define AI_MAX_SPOKEN 64
+static int aiSpoken[AI_MAX_SPOKEN];
+static int aiSpokenCount = 0;
+
+void
+AiConv_NoteSpoken (int phraseRef)
+{
+	int i;
+
+	if (phraseRef <= 0 || aiSpokenCount >= AI_MAX_SPOKEN)
+		return;
+	for (i = 0; i < aiSpokenCount; ++i)
+	{
+		if (aiSpoken[i] == phraseRef)
+			return;
+	}
+	aiSpoken[aiSpokenCount++] = phraseRef;
+}
+
+void
+AiConv_ForgetSpoken (void)
+{
+	aiSpokenCount = 0;
+}
+
+void
+AiConv_SetWaitCallback (void (*fn) (void))
+{
+	aiWaitFn = (AiProc_WaitFn)fn;
+}
 
 void
 AiConv_SuppressPhrases (BOOLEAN suppress)
@@ -61,7 +93,7 @@ handshake (void)
 
 	if (!sendLine ("{\"type\":\"hello\",\"protocol\":1}"))
 		return FALSE;
-	if (!AiProc_ReadLine (line, sizeof line, AI_REPLY_TIMEOUT_MS))
+	if (!AiProc_ReadLine (line, sizeof line, AI_REPLY_TIMEOUT_MS, aiWaitFn))
 	{
 		log_add (log_Warning, "AI: no handshake reply from sidecar");
 		return FALSE;
@@ -160,6 +192,16 @@ buildRequest (char *buf, size_t cap, int requestId, const char *playerInput,
 	}
 	AiJson_EndArray (&w);
 
+	/* What he has already said this conversation, which is what he is
+	 * allowed to draw on. */
+	AiJson_BeginArray (&w, "spoken_refs");
+	for (i = 0; i < aiSpokenCount; ++i)
+	{
+		AiJson_WriteRawElement (&w);
+		AiJson_WriteInt (&w, NULL, aiSpoken[i]);
+	}
+	AiJson_EndArray (&w);
+
 	AiJson_WriteInt (&w, "visits", visits);
 	AiJson_EndObject (&w);
 
@@ -188,7 +230,7 @@ AiConv_Converse (const char *playerInput, const AI_ACTION *actions,
 	}
 
 	if (!sendLine (line)
-			|| !AiProc_ReadLine (line, sizeof line, AI_REPLY_TIMEOUT_MS))
+			|| !AiProc_ReadLine (line, sizeof line, AI_REPLY_TIMEOUT_MS, aiWaitFn))
 	{
 		log_add (log_Warning, "AI: sidecar stopped responding");
 		aiActive = FALSE;

@@ -63,6 +63,18 @@ BOOLEAN AiConv_Converse (const char *playerInput, const AI_ACTION *actions,
  * Generated prose replaces the canonical line rather than accompanying it, so
  * the encounter handler is dispatched with phrases muted: its state changes
  * still happen, but its authored text does not appear alongside the AI's. */
+/* Installed by the game; called repeatedly while waiting for a reply so the
+ * conversation screen keeps animating instead of appearing hung. */
+void AiConv_SetWaitCallback (void (*fn) (void));
+
+/* Records that the character has spoken a canonical phrase.
+ *
+ * These become the character's usable knowledge: he may repeat and elaborate
+ * on what he has already said, but never volunteer canon he has not reached.
+ * That keeps grounding and spoiler control on the same mechanism. */
+void AiConv_NoteSpoken (int phraseRef);
+void AiConv_ForgetSpoken (void);
+
 void AiConv_SuppressPhrases (BOOLEAN suppress);
 BOOLEAN AiConv_PhrasesSuppressed (void);
 

@@ -1451,24 +1451,37 @@ static void PlayerResponseInput (ENCOUNTER_STATE *pES);
 
 /* ---- AI Edition ------------------------------------------------------- */
 
-/* Redraws the line being typed, so the player is not entering text blind.
+static int aiWaitTicks;
+
+/* Draws the line being typed, with a caret so the field reads as editable.
  * FeedbackPlayerPhrase is what the menu path uses to show the chosen
- * response, so the typed line appears in the same place.
- *
- * This is the CHANGE callback, not the frame callback: redrawing on
- * every frame stalls the conversation screen. */
+ * response, so the typed line appears in the same place. */
+static void
+AiShowInput (const UNICODE *text, BOOLEAN caret)
+{
+	UNICODE buf[AI_MAX_INPUT + 4];
+
+	snprintf (buf, sizeof (buf), "%s%s", text, caret ? "_" : " ");
+	FeedbackPlayerPhrase (buf);
+}
+
+/* Called when the text actually changes. Redrawing on every frame instead
+ * is what stalled the conversation screen in an earlier revision. */
 static BOOLEAN
 OnAiInputChange (TEXTENTRY_STATE *pTES)
 {
-	FeedbackPlayerPhrase (pTES->BaseStr);
+	AiShowInput (pTES->BaseStr, TRUE);
 	return TRUE;
 }
 
 /* Keeps the alien animating while the player types.
  *
- * DoTextEntry runs its own nested input loop, during which nothing
- * else pumps the comm screen, so the animation freezes. SelectResponse
- * pumps these two for the same reason during its PC-mode pause. */
+ * DoTextEntry runs its own nested input loop, during which nothing else
+ * pumps the comm screen, so the animation freezes. SelectResponse pumps
+ * these two for the same reason during its PC-mode pause.
+ *
+ * The caret is deliberately NOT blinked here: redrawing the line to toggle
+ * it makes the text visibly jitter, which is worse than a steady caret. */
 static BOOLEAN
 OnAiInputFrame (TEXTENTRY_STATE *pTES)
 {
@@ -1476,6 +1489,22 @@ OnAiInputFrame (TEXTENTRY_STATE *pTES)
 	UpdateDuty (FALSE);
 	UpdateAnimations (FALSE);
 	return TRUE;
+}
+
+/* Called repeatedly while waiting for the model.
+ *
+ * A reply takes tens of seconds. Without this the game is simply frozen,
+ * which reads as a crash rather than as thinking. */
+static void
+AiOnWait (void)
+{
+	UpdateDuty (FALSE);
+	UpdateAnimations (FALSE);
+
+	/* Say something once, after a beat, rather than on every tick. */
+	if (aiWaitTicks == 80)
+		FeedbackPlayerPhrase ("(transmitting...)");
+	++aiWaitTicks;
 }
 
 /* Speaks a generated line.
@@ -1554,6 +1583,9 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 	/* Cancelled or empty: leave the action set standing and ask again. */
 	if (!entered || input[0] == '\0')
 		return;
+
+	aiWaitTicks = 0;
+	AiConv_SetWaitCallback (AiOnWait);
 
 	if (!AiConv_Converse (input, actions, (int)count, 0, &reply))
 	{	/* The AI failed; this turn falls back to the original menu. */

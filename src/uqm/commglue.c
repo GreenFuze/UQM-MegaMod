@@ -190,6 +190,10 @@ NPCPhrase_cb (int index, CallbackFunction cb)
 	if (index == 0)
 		return;
 
+	/* Recorded even when suppressed: the canonical beat still happened, and
+	 * it is what the character is subsequently allowed to talk about. */
+	AiConv_NoteSpoken (index);
+
 	/* In AI mode the generated line has already been spliced in; the
 	 * canonical text would otherwise be spoken immediately after it. */
 	if (AiConv_PhrasesSuppressed ())
