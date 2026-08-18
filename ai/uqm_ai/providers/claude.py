@@ -30,14 +30,17 @@ except ImportError:  # pragma: no cover - exercised only on installs without it
 
 
 _RESPONSE_FORMAT = """
-Reply with ONLY a JSON object, no prose around it, no code fence. Fill the
-fields IN THIS ORDER - decide before you write, or you will drift into
-speaking and forget to act:
+Reply with ONLY a JSON object, no prose around it, no code fence:
 
-{"considering": "<one short line: does this exchange match a listed ref? which one, and are you willing?>",
- "action": <the ref number, or null>,
+{"matches_ref": <the ref this exchange corresponds to, or null>,
+ "willing": <true if you are going along with it, false if you refuse>,
  "spoken_text": "<what you say, first person, in character>",
  "remember": "<one short line worth recalling next time, or null>"}
+
+matches_ref is about MEANING, not agreement: if the captain is inviting you
+along, that is the invitation ref whether or not you accept. willing is your
+decision about it. Answer both honestly - if you say yes in spoken_text but
+set willing to false, nothing happens and the moment is lost.
 """.strip()
 
 
@@ -108,15 +111,9 @@ class ClaudeProvider(LLMProvider):
             lines.append(f'  {action.ref} = the captain means: "{action.text}"{ending}')
         lines.append("")
         lines.append(
-            "Set action to the ref that best represents what has just happened "
-            "in this exchange - either because the captain effectively said "
-            "that line, or because you have DECIDED to go along with it. If "
-            "you agree to something, you must set the matching ref; saying yes "
-            "in words alone changes nothing and the moment is lost."
-        )
-        lines.append(
-            "Use null when nothing on the list reflects the exchange, or when "
-            "you are refusing. Refusing is a real choice - say so in character."
+            "Decide two things: which of those lines this exchange corresponds "
+            "to in meaning, and whether you are going along with it. Refusing "
+            "is a real choice - say so in character."
         )
         lines.append(
             "Say only what you actually know. Do not invent Spathi history, "
@@ -152,11 +149,22 @@ class ClaudeProvider(LLMProvider):
                 id=request.id, spoken_text=text, action=None, remember=None
             )
 
-        action = payload.get("action")
-        if isinstance(action, str) and action.isdigit():
-            action = int(action)
-        if not isinstance(action, int):
-            action = None
+        # The action is DERIVED, not taken from the model. Asking it to fill an
+        # action field meant it would agree warmly in prose and leave the field
+        # null, so the agreement never happened. Two simple questions - what
+        # does this mean, and are you willing - are far more reliable, and the
+        # code joins them up.
+        matched = payload.get("matches_ref")
+        if isinstance(matched, str) and matched.isdigit():
+            matched = int(matched)
+        if not isinstance(matched, int):
+            matched = None
+
+        willing = payload.get("willing")
+        if not isinstance(willing, bool):
+            willing = matched is not None
+
+        action = matched if (matched is not None and willing) else None
 
         remember = payload.get("remember")
         if not isinstance(remember, str) or not remember.strip():
