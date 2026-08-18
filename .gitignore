@@ -325,3 +325,7 @@ CPackSourceConfig.cmake
 cmake-build-debug
 cmake-build-release
 .cmake
+# AI Edition (Python sidecar)
+__pycache__/
+*.py[cod]
+.pytest_cache/
