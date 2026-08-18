@@ -22,6 +22,7 @@
 #include "build.h"
 #include "commanim.h"
 #include "commglue.h"
+#include "ai/aiconv.h"
 #include "controls.h"
 #include "colors.h"
 #include "hyper.h"
@@ -1445,6 +1446,89 @@ SelectResponse (ENCOUNTER_STATE *pES)
 			(pES->response_list[pES->cur_response].response_ref);
 }
 
+
+static void PlayerResponseInput (ENCOUNTER_STATE *pES);
+
+/* ---- AI Edition ------------------------------------------------------- */
+
+/* Redraws the line being typed, so the player is not entering text blind.
+ * FeedbackPlayerPhrase is what the menu path uses to show the chosen
+ * response, so the typed line appears in the same place. */
+static BOOLEAN
+OnAiInputFrame (TEXTENTRY_STATE *pTES)
+{
+	FeedbackPlayerPhrase (pTES->BaseStr);
+	return TRUE;
+}
+
+/* One AI-mode conversational turn, replacing the response menu.
+ *
+ * The action set handed to the sidecar is exactly what the encounter
+ * exported this turn, read straight out of response_list, so nothing has to
+ * be maintained per race and an invented action has no entry to match. */
+static void
+AiPlayerResponseInput (ENCOUNTER_STATE *pES)
+{
+	AI_ACTION actions[AI_MAX_ACTIONS];
+	AI_REPLY reply;
+	TEXTENTRY_STATE tes;
+	UNICODE input[AI_MAX_INPUT];
+	COUNT count = 0;
+	COUNT i;
+
+	for (i = 0; i < pES->num_responses && count < AI_MAX_ACTIONS; ++i)
+	{
+		actions[count].ref = (int)pES->response_list[i].response_ref;
+		actions[count].text = pES->response_list[i].response_text.pStr;
+		actions[count].terminal = FALSE;
+		++count;
+	}
+
+	input[0] = '\0';
+	memset (&tes, 0, sizeof (tes));
+	tes.Initialized = FALSE;
+	tes.BaseStr = input;
+	tes.CursorPos = 0;
+	tes.MaxSize = sizeof (input);
+	tes.CbParam = NULL;
+	tes.ChangeCallback = NULL;
+	tes.FrameCallback = OnAiInputFrame;
+
+	/* Cancelled or empty: leave the action set standing and ask again. */
+	if (!DoTextEntry (&tes) || input[0] == '\0')
+		return;
+
+	if (!AiConv_Converse (input, actions, (int)count, 0, &reply))
+	{	/* The AI failed; this turn falls back to the original menu. */
+		PlayerResponseInput (pES);
+		return;
+	}
+
+	if (reply.hasAction)
+	{
+		for (i = 0; i < pES->num_responses; ++i)
+		{
+			if ((int)pES->response_list[i].response_ref == reply.action)
+			{
+				/* Dispatch normally so the deterministic transition is the
+				 * game's own, with the canonical phrases muted because the
+				 * generated line replaces them. SelectResponse clears the
+				 * subtitles, so the generated text is spliced afterwards. */
+				pES->cur_response = (BYTE)i;
+				AiConv_SuppressPhrases (TRUE);
+				SelectResponse (pES);
+				AiConv_SuppressPhrases (FALSE);
+				SpliceTrack (NULL, reply.spokenText, NULL, NULL);
+				return;
+			}
+		}
+	}
+
+	/* No action taken: pure conversation. The exported actions still stand,
+	 * so the player simply speaks again. */
+	SpliceTrack (NULL, reply.spokenText, NULL, NULL);
+}
+
 // Called when the player presses the cancel button in comm.
 static void
 SelectConversationSummary (ENCOUNTER_STATE *pES)
@@ -1613,6 +1697,24 @@ DoCommunication (ENCOUNTER_STATE *pES)
 	}
 	else
 	{
+		/* AI mode is started lazily on the first conversation, and only
+		 * attempted once: a missing sidecar must not retry every turn. */
+		static BOOLEAN aiStartAttempted = FALSE;
+
+		if (optAiConversation == OPTVAL_ENABLED)
+		{
+			if (!AiConv_IsActive () && !aiStartAttempted)
+			{
+				aiStartAttempted = TRUE;
+				AiConv_Start ();
+			}
+			if (AiConv_IsActive ())
+			{
+				AiPlayerResponseInput (pES);
+				return TRUE;
+			}
+		}
+
 		PlayerResponseInput (pES);
 		return TRUE;
 	}

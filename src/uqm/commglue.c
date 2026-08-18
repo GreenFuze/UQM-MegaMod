@@ -18,6 +18,7 @@
 
 #define DEBUG_STARSEED
 #include "commglue.h"
+#include "ai/aiconv.h"
 
 #include "battle.h"
 		// For instantVictory
@@ -187,6 +188,11 @@ NPCPhrase_cb (int index, CallbackFunction cb)
 	COUNT i;
 
 	if (index == 0)
+		return;
+
+	/* In AI mode the generated line has already been spliced in; the
+	 * canonical text would otherwise be spoken immediately after it. */
+	if (AiConv_PhrasesSuppressed ())
 		return;
 
 	pStr = (UNICODE *)GetStringAddress (

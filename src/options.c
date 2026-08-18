@@ -126,6 +126,7 @@ OPT_ENABLABLE optUnscaledStarSystem;
 int optScanSphere;
 int optNebulaeVolume;
 OPT_ENABLABLE optSlaughterMode;
+OPT_ENABLABLE optAiConversation;
 BOOLEAN optMaskOfDeceit;
 OPT_ENABLABLE optAdvancedAutoPilot;
 OPT_ENABLABLE optMeleeToolTips;

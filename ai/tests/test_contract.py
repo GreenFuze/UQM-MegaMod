@@ -31,8 +31,24 @@ REPO = Path(__file__).resolve().parents[2]
 CONTENT = REPO.parent / "uqm-megamod-content"
 
 
+def _table() -> PhraseTable:
+    return PhraseTable(
+        StringsHeader(REPO / "src/uqm/comm/spathi/strings.h"),
+        DialogueFile(CONTENT / "base/comm/spathi/spathi.txt"),
+    )
+
+
+TABLE = _table()
+KEY_BY_REF = {e.enum_value: e.key for e in TABLE.entries}
+
+
+def ref_of(key: str) -> int:
+    return TABLE.by_key(key).enum_value
+
+
 def make_request(text: str, actions: list[str], **context) -> ConverseRequest:
-    return ConverseRequest.from_json(
+    """Build a request using the real RESPONSE_REF values the game would send."""
+    request = ConverseRequest.from_json(
         {
             "type": "converse",
             "id": 1,
@@ -42,19 +58,19 @@ def make_request(text: str, actions: list[str], **context) -> ConverseRequest:
                 "encounter": "SPATHI_PLUTO",
             },
             "player_input": text,
-            "actions": [{"id": a, "text": a, "terminal": False} for a in actions],
+            "actions": [
+                {"ref": ref_of(a), "text": TABLE.by_key(a).text, "terminal": False}
+                for a in actions
+            ],
             "context": context,
         }
     )
+    return request.with_resolved_keys(KEY_BY_REF.get)
 
 
 @pytest.fixture(scope="module")
 def builder() -> PromptBuilder:
-    table = PhraseTable(
-        StringsHeader(REPO / "src/uqm/comm/spathi/strings.h"),
-        DialogueFile(CONTENT / "base/comm/spathi/spathi.txt"),
-    )
-    return PromptBuilder(FWIFFO, table)
+    return PromptBuilder(FWIFFO, TABLE)
 
 
 class TestPhraseTable:
@@ -73,7 +89,7 @@ class TestValidation:
         validator = ResponseValidator(request)
 
         result = validator.validate(
-            ConverseResponse(id=1, spoken_text="ha ha", action="destroy_the_universe")
+            ConverseResponse(id=1, spoken_text="ha ha", action=9999)
         )
 
         assert result.action is None, "unexported action must never be actioned"
@@ -85,7 +101,7 @@ class TestValidation:
         # offered last turn is not offered now.
         request = make_request("come with me", ["what_about_yourself"])
         result = ResponseValidator(request).validate(
-            ConverseResponse(id=1, spoken_text="ok", action="join_us")
+            ConverseResponse(id=1, spoken_text="ok", action=ref_of("join_us"))
         )
         assert result.action is None
 
@@ -115,7 +131,7 @@ class TestMockProvider:
         response = MockProvider().generate(
             make_request("Fwiffo, come with me.", ["join_us", "changed_mind"]), ""
         )
-        assert response.action == "join_us"
+        assert response.action == ref_of("join_us")
 
     def test_fails_closed_when_intent_is_not_offered(self) -> None:
         response = MockProvider().generate(
@@ -195,7 +211,7 @@ class TestSidecarResilience:
                     "encounter": "SPATHI_PLUTO",
                 },
                 "player_input": "hello",
-                "actions": [{"id": "join_us", "text": "Come.", "terminal": True}],
+                "actions": [{"ref": 84, "text": "Come.", "terminal": True}],
             }
         )
         replies = self._run(builder, BrokenProvider(), [request])

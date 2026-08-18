@@ -81,6 +81,11 @@ class PromptBuilder:
             for entry in table.entries
             if entry.kind is PhraseKind.NPC
         }
+        self._key_by_ref = {entry.enum_value: entry.key for entry in table.entries}
+
+    def key_for_ref(self, ref: int) -> str | None:
+        """Map a game RESPONSE_REF to its phrase key, or None if unknown."""
+        return self._key_by_ref.get(ref)
 
     @property
     def profile(self) -> CharacterProfile:

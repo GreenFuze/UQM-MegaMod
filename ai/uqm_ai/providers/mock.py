@@ -55,28 +55,32 @@ class MockProvider(LLMProvider):
         return "mock"
 
     def generate(self, request: ConverseRequest, system_prompt: str) -> ConverseResponse:
-        action = self._select_action(request)
-        spoken = _PROSE.get(action, _DEFAULT_PROSE) if action else _DEFAULT_PROSE
+        chosen = self._select_action(request)
+        key = chosen.key if chosen else None
+        spoken = _PROSE.get(key, _DEFAULT_PROSE) if key else _DEFAULT_PROSE
 
         # Only record a memory when something actually happened, so the mock
         # does not fill memory with noise on every idle exchange.
         remember = None
-        if action:
-            remember = f"Player chose {action}; Fwiffo responded in character."
+        if key:
+            remember = f"Player chose {key}; Fwiffo responded in character."
 
         return ConverseResponse(
-            id=request.id, spoken_text=spoken, action=action, remember=remember
+            id=request.id,
+            spoken_text=spoken,
+            action=chosen.ref if chosen else None,
+            remember=remember,
         )
 
     @staticmethod
-    def _select_action(request: ConverseRequest) -> str | None:
+    def _select_action(request: ConverseRequest):
         """Match intent, but only against actions the encounter exported.
 
         An intent whose action is not on offer yields None rather than a
         substitute, mirroring how the real provider must fail closed.
         """
-        offered = request.action_ids()
-        for action_id, pattern in _INTENT_RULES:
-            if action_id in offered and pattern.search(request.player_input):
-                return action_id
+        for key, pattern in _INTENT_RULES:
+            candidate = request.by_key(key)
+            if candidate is not None and pattern.search(request.player_input):
+                return candidate
         return None

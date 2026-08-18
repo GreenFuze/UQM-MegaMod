@@ -486,6 +486,11 @@ editbin /REBASE:BASE=0x400000 /DYNAMICBASE:NO "$(LocalDebuggerWorkingDirectory)$
     <ClCompile Include="..\..\src\uqm\collide.c" />
     <ClCompile Include="..\..\src\uqm\comm.c" />
     <ClCompile Include="..\..\src\uqm\commanim.c" />
+    <ClCompile Include="..\..\src\uqm\ai\aiconv.c" />
+
+    <ClCompile Include="..\..\src\uqm\ai\aijson.c" />
+    <ClCompile Include="..\..\src\uqm\ai\aiproc.c" />
+
     <ClCompile Include="..\..\src\uqm\commglue.c" />
     <ClCompile Include="..\..\src\uqm\confirm.c" />
     <ClCompile Include="..\..\src\uqm\cons_res.c" />
@@ -913,6 +918,11 @@ editbin /REBASE:BASE=0x400000 /DYNAMICBASE:NO "$(LocalDebuggerWorkingDirectory)$
     <ClInclude Include="..\..\src\uqm\colors.h" />
     <ClInclude Include="..\..\src\uqm\comm.h" />
     <ClInclude Include="..\..\src\uqm\commanim.h" />
+    <ClInclude Include="..\..\src\uqm\ai\aiconv.h" />
+
+    <ClInclude Include="..\..\src\uqm\ai\aijson.h" />
+    <ClInclude Include="..\..\src\uqm\ai\aiproc.h" />
+
     <ClInclude Include="..\..\src\uqm\commglue.h" />
     <ClInclude Include="..\..\src\uqm\cons_res.h" />
     <ClInclude Include="..\..\src\uqm\controls.h" />

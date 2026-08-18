@@ -1,0 +1,2 @@
+uqm_CFILES="aiconv.c aijson.c aiproc.c"
+uqm_HFILES="aiconv.h aijson.h aiproc.h"

@@ -88,6 +88,11 @@ class Sidecar:
         }
 
     def _converse(self, request: ConverseRequest) -> dict:
+        # The game identifies actions by numeric RESPONSE_REF, since enum
+        # names do not exist at runtime in C. Resolve them so the persona and
+        # the provider can reason about names.
+        request = request.with_resolved_keys(self._builder.key_for_ref)
+
         prompt = self._builder.render(
             permitted_keys=request.available_knowledge,
             memory=request.memory,

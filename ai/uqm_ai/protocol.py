@@ -36,20 +36,24 @@ class ActionSpec:
     ExitConversation.
     """
 
-    id: str
+    ref: int
     text: str
     terminal: bool
+    key: str | None = None  # resolved from the phrase table by the sidecar
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> ActionSpec:
         try:
             return cls(
-                id=str(raw["id"]),
+                ref=int(raw["ref"]),
                 text=str(raw["text"]),
                 terminal=bool(raw.get("terminal", False)),
             )
-        except KeyError as exc:
-            raise ProtocolError(f"action missing field {exc}") from exc
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProtocolError(f"action missing or invalid field: {exc}") from exc
+
+    def resolved(self, key: str | None) -> ActionSpec:
+        return ActionSpec(ref=self.ref, text=self.text, terminal=self.terminal, key=key)
 
 
 @dataclass(frozen=True)
@@ -68,15 +72,12 @@ class SessionRef:
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> SessionRef:
-        try:
-            return cls(
-                save_id=str(raw["save_id"]),
-                character=str(raw["character"]),
-                encounter=str(raw["encounter"]),
-                state_fingerprint=str(raw.get("state_fingerprint", "")),
-            )
-        except KeyError as exc:
-            raise ProtocolError(f"session missing field {exc}") from exc
+        return cls(
+            save_id=str(raw.get("save_id", "")),
+            character=str(raw.get("character", "")),
+            encounter=str(raw.get("encounter", "")),
+            state_fingerprint=str(raw.get("state_fingerprint", "")),
+        )
 
 
 @dataclass(frozen=True)
@@ -104,7 +105,21 @@ class ConverseRequest:
         if len(player_input) > MAX_PLAYER_INPUT:
             raise ProtocolError(f"player_input exceeds {MAX_PLAYER_INPUT} characters")
 
+        # The C writer emits a flat object (its JSON writer has no keyed
+        # nested-object support, and a smaller writer is worth more than a
+        # prettier wire format). Accept both shapes.
         context = raw.get("context", {})
+        session = raw.get("session")
+        if session is None:
+            session = {
+                "save_id": raw.get("session_save_id", ""),
+                "character": raw.get("session_character", ""),
+                "encounter": raw.get("session_encounter", ""),
+                "state_fingerprint": raw.get("session_state_fingerprint", ""),
+            }
+        visits = int(raw.get("visits", context.get("visits", 0)))
+        knowledge = raw.get("available_knowledge", context.get("available_knowledge", ()))
+        memory = raw.get("memory", context.get("memory", ()))
         try:
             request_id = int(raw["id"])
         except (KeyError, TypeError, ValueError) as exc:
@@ -112,16 +127,34 @@ class ConverseRequest:
 
         return cls(
             id=request_id,
-            session=SessionRef.from_json(raw.get("session", {})),
+            session=SessionRef.from_json(session),
             player_input=player_input,
             actions=actions,
-            visits=int(context.get("visits", 0)),
-            available_knowledge=tuple(context.get("available_knowledge", ())),
-            memory=tuple(context.get("memory", ())),
+            visits=visits,
+            available_knowledge=tuple(knowledge),
+            memory=tuple(memory),
         )
 
-    def action_ids(self) -> frozenset[str]:
-        return frozenset(a.id for a in self.actions)
+    def action_refs(self) -> frozenset[int]:
+        return frozenset(a.ref for a in self.actions)
+
+    def by_key(self, key: str) -> ActionSpec | None:
+        for action in self.actions:
+            if action.key == key:
+                return action
+        return None
+
+    def with_resolved_keys(self, resolve) -> ConverseRequest:
+        """Return a copy whose actions carry their phrase-table key."""
+        return ConverseRequest(
+            id=self.id,
+            session=self.session,
+            player_input=self.player_input,
+            actions=tuple(a.resolved(resolve(a.ref)) for a in self.actions),
+            visits=self.visits,
+            available_knowledge=self.available_knowledge,
+            memory=self.memory,
+        )
 
 
 @dataclass(frozen=True)
@@ -130,7 +163,7 @@ class ConverseResponse:
 
     id: int
     spoken_text: str
-    action: str | None = None
+    action: int | None = None
     remember: str | None = None
     audio_path: str | None = None
 
@@ -156,7 +189,7 @@ class ResponseValidator:
 
     def __init__(self, request: ConverseRequest) -> None:
         self._request = request
-        self._permitted = request.action_ids()
+        self._permitted = request.action_refs()
         self._rejections: list[str] = []
 
     @property
@@ -177,7 +210,7 @@ class ResponseValidator:
             audio_path=response.audio_path,
         )
 
-    def _validate_action(self, action: str | None) -> str | None:
+    def _validate_action(self, action: int | None) -> int | None:
         if action is None:
             return None
         if action not in self._permitted:
