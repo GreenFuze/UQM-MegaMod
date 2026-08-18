@@ -12,6 +12,7 @@ from pathlib import Path
 from .dialogue import DialogueFile
 from .persona import FWIFFO, PromptBuilder
 from .phrase_table import PhraseTable, StringsHeader
+from .providers.base import LLMProvider, ProviderError
 from .providers.mock import MockProvider
 from .sidecar import Sidecar
 
@@ -34,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(__file__).resolve().parents[2],
         help="path to the uqm-megamod checkout",
     )
-    parser.add_argument("--provider", default="mock", choices=["mock"])
+    parser.add_argument("--provider", default="mock",
+                        choices=["mock", "claude"])
     args = parser.parse_args(argv)
 
     profile, header_rel, dialogue_rel = _CHARACTERS[args.character]
@@ -50,7 +52,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[uqm-ai] cannot load {args.character}: {exc}", file=sys.stderr)
         return 2
 
-    Sidecar(PromptBuilder(profile, table), MockProvider()).run()
+    # Fail loudly on a provider that cannot start: silently falling back to
+    # the mock would look like a working AI producing very poor writing.
+    provider: LLMProvider
+    if args.provider == "claude":
+        from .providers.claude import ClaudeProvider
+
+        try:
+            provider = ClaudeProvider()
+        except ProviderError as exc:
+            print(f"[uqm-ai] {exc}", file=sys.stderr)
+            return 3
+    else:
+        provider = MockProvider()
+
+    Sidecar(PromptBuilder(profile, table), provider).run()
     return 0
 
 

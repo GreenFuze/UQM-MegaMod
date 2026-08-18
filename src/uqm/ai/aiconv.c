@@ -18,7 +18,7 @@
 /* How long to wait for a reply before abandoning the turn. Generation is
  * slow, but a conversation that never returns is worse than one that falls
  * back to the menu. */
-#define AI_REPLY_TIMEOUT_MS  30000
+#define AI_REPLY_TIMEOUT_MS  90000
 
 #define AI_LINE_MAX          8192
 

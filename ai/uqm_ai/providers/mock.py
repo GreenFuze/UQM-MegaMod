@@ -10,6 +10,7 @@ It is deliberately crude. Its job is to exercise the contract, not to be good.
 from __future__ import annotations
 
 import re
+import zlib
 
 from ..protocol import ConverseRequest, ConverseResponse
 from .base import LLMProvider
@@ -17,11 +18,19 @@ from .base import LLMProvider
 # Player intent -> the action id it should select, when that action is
 # actually on offer this turn. Order matters: the first match wins.
 _INTENT_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("join_us", re.compile(r"\b(join|come with|recruit|aboard|crew up)\b", re.I)),
-    ("changed_mind", re.compile(r"\b(never ?mind|forget it|goodbye|bye|leave)\b", re.I)),
+    # Opening exchange. Only these four are exported on the first turn, so
+    # without them nothing the player types can do anything at all.
+    ("identify", re.compile(r"\b(identify|who are you|name yourself)\b", re.I)),
+    ("hi_there", re.compile(r"\b(hi|hello|greetings|peace|friend|no harm)\b", re.I)),
+    ("dont_kill", re.compile(r"\b(don't kill|do not kill|spare|mercy|please)\b", re.I)),
+    ("we_fight_1", re.compile(r"\b(fight|surrender|prepare to)\b", re.I)),
+    # Later in the conversation.
+    ("join_us", re.compile(r"\b(join|come with|recruit|aboard)\b", re.I)),
+    ("changed_mind", re.compile(r"\b(never ?mind|forget it|goodbye|bye)\b", re.I)),
     ("die_slugboy", re.compile(r"\b(die|kill you|destroy you|attack)\b", re.I)),
     ("where_are_urquan", re.compile(r"\bur-?quan\b", re.I)),
-    ("what_about_yourself", re.compile(r"\b(who are you|yourself|about you)\b", re.I)),
+    ("what_about_yourself", re.compile(r"\b(yourself|about you)\b", re.I)),
+    ("what_doing_on_pluto_1", re.compile(r"\b(pluto|doing here|why are you here)\b", re.I)),
 )
 
 _PROSE = {
@@ -40,10 +49,46 @@ _PROSE = {
     ),
 }
 
-_DEFAULT_PROSE = (
+# When nothing matches, the turn is pure conversation. Vary the reply by the
+# input so a correct "no action taken" does not look like a stuck program --
+# during testing an identical line every turn reads as a failure.
+_IDLE_PROSE = (
     "I am not at all certain I should be discussing this. But since you asked "
     "so politely, and since you have all those weapons pointed at me, I "
-    "suppose a small amount of cooperation could not hurt."
+    "suppose a small amount of cooperation could not hurt.",
+    "That is a very forward question! Spathi do not generally answer forward "
+    "questions, on the grounds that the asker may be sizing us up for a meal.",
+    "Hmm. I shall have to think about that, at length, somewhere safe. Which "
+    "is to say: not here, and preferably not while you are looking at me.",
+    "You know, for an enormous heavily-armed alien vessel, you ask surprisingly "
+    "conversational questions. I find that deeply suspicious and mildly nice.",
+)
+
+
+def _idle_prose(player_input: str) -> str:
+    """Deterministic, but different for different inputs."""
+    digest = zlib.crc32(player_input.strip().lower().encode("utf-8"))
+    return _IDLE_PROSE[digest % len(_IDLE_PROSE)]
+
+_PROSE.update(
+    {
+        "identify": (
+            "Please do not shoot! I am Captain Fwiffo of the Spathi voidship "
+            "StarRunner, and I surrender preemptively, as is our custom."
+        ),
+        "hi_there": (
+            "Peace? PEACE? Oh, thank goodness. Although that is precisely what "
+            "something planning to eat me would say. But I choose to believe you!"
+        ),
+        "dont_kill": (
+            "You will not kill me? How refreshingly civilised. I had prepared a "
+            "small speech for the occasion, but I shall save it for later."
+        ),
+        "we_fight_1": (
+            "Fight? FIGHT? I must inform you that I am extremely bad at that, "
+            "and I shall be fleeing at my earliest convenience!"
+        ),
+    }
 )
 
 
@@ -57,7 +102,9 @@ class MockProvider(LLMProvider):
     def generate(self, request: ConverseRequest, system_prompt: str) -> ConverseResponse:
         chosen = self._select_action(request)
         key = chosen.key if chosen else None
-        spoken = _PROSE.get(key, _DEFAULT_PROSE) if key else _DEFAULT_PROSE
+        spoken = _PROSE.get(key) if key else None
+        if spoken is None:
+            spoken = _idle_prose(request.player_input)
 
         # Only record a memory when something actually happened, so the mock
         # does not fill memory with noise on every idle exchange.

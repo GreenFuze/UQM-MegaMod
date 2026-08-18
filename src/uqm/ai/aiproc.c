@@ -25,7 +25,7 @@ AiProc_Spawn (const char *workingDir, char *errBuf, size_t errCap)
 	PROCESS_INFORMATION pi;
 	HANDLE stdinRd = NULL, stdinWr = NULL;
 	HANDLE stdoutRd = NULL, stdoutWr = NULL;
-	char cmdline[] = "python -m uqm_ai";
+	char cmdline[] = "python -m uqm_ai --provider claude";
 
 	sa.nLength = sizeof (SECURITY_ATTRIBUTES);
 	sa.bInheritHandle = TRUE;
@@ -217,8 +217,10 @@ AiProc_Spawn (const char *workingDir, char *errBuf, size_t errCap)
 		close (outPipe[1]);
 		if (workingDir != NULL && chdir (workingDir) != 0)
 			_exit (127);
-		execlp ("python3", "python3", "-m", "uqm_ai", (char *)NULL);
-		execlp ("python", "python", "-m", "uqm_ai", (char *)NULL);
+		execlp ("python3", "python3", "-m", "uqm_ai", "--provider", "claude",
+				(char *)NULL);
+		execlp ("python", "python", "-m", "uqm_ai", "--provider", "claude",
+				(char *)NULL);
 		_exit (127);
 	}
 

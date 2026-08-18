@@ -1453,12 +1453,58 @@ static void PlayerResponseInput (ENCOUNTER_STATE *pES);
 
 /* Redraws the line being typed, so the player is not entering text blind.
  * FeedbackPlayerPhrase is what the menu path uses to show the chosen
- * response, so the typed line appears in the same place. */
+ * response, so the typed line appears in the same place.
+ *
+ * This is the CHANGE callback, not the frame callback: redrawing on
+ * every frame stalls the conversation screen. */
 static BOOLEAN
-OnAiInputFrame (TEXTENTRY_STATE *pTES)
+OnAiInputChange (TEXTENTRY_STATE *pTES)
 {
 	FeedbackPlayerPhrase (pTES->BaseStr);
 	return TRUE;
+}
+
+/* Keeps the alien animating while the player types.
+ *
+ * DoTextEntry runs its own nested input loop, during which nothing
+ * else pumps the comm screen, so the animation freezes. SelectResponse
+ * pumps these two for the same reason during its PC-mode pause. */
+static BOOLEAN
+OnAiInputFrame (TEXTENTRY_STATE *pTES)
+{
+	(void) pTES;
+	UpdateDuty (FALSE);
+	UpdateAnimations (FALSE);
+	return TRUE;
+}
+
+/* Speaks a generated line.
+ *
+ * The subtitle system is entirely track-based: SpliceTrack with a NULL track
+ * name only APPENDS to an existing track, and once the previous phrase has
+ * finished there is none, so the text is discarded with a warning. A track
+ * therefore has to exist, and creating one requires an audio clip.
+ *
+ * So a canonical clip is borrowed purely as a carrier. The words are ours,
+ * the audio is not - which is wrong, and is exactly what the TTS provider
+ * will replace. Until then this is what makes generated text visible at all. */
+static void
+AiSpeakGenerated (const char *text)
+{
+	UNICODE *carrier;
+
+	carrier = GetStringSoundClip (SetAbsStringTableIndex (
+			CommData.ConversationPhrases, 0));
+	if (carrier == NULL)
+	{	/* No voice pack installed: nothing to hang subtitles on. */
+		log_add (log_Warning, "AI: no carrier clip; generated line not shown");
+		return;
+	}
+
+	StopTrack ();
+	ClearSubtitles ();
+	TalkingFinished = FALSE;
+	SpliceTrack (carrier, (UNICODE *)text, NULL, NULL);
 }
 
 /* One AI-mode conversational turn, replacing the response menu.
@@ -1475,6 +1521,7 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 	UNICODE input[AI_MAX_INPUT];
 	COUNT count = 0;
 	COUNT i;
+	BOOLEAN entered;
 
 	for (i = 0; i < pES->num_responses && count < AI_MAX_ACTIONS; ++i)
 	{
@@ -1491,18 +1538,32 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 	tes.CursorPos = 0;
 	tes.MaxSize = sizeof (input);
 	tes.CbParam = NULL;
-	tes.ChangeCallback = NULL;
+	tes.ChangeCallback = OnAiInputChange;
 	tes.FrameCallback = OnAiInputFrame;
 
+	for (i = 0; i < count; ++i)
+		log_add (log_Debug, "AI: offering ref %d [%.40s]", actions[i].ref,
+				actions[i].text != NULL ? actions[i].text : "");
+	log_add (log_Debug, "AI: entering text input, %d actions offered",
+			(int)count);
+
+	entered = DoTextEntry (&tes);
+	log_add (log_Debug, "AI: text entry returned %d, input=[%s]",
+			(int)entered, input);
+
 	/* Cancelled or empty: leave the action set standing and ask again. */
-	if (!DoTextEntry (&tes) || input[0] == '\0')
+	if (!entered || input[0] == '\0')
 		return;
 
 	if (!AiConv_Converse (input, actions, (int)count, 0, &reply))
 	{	/* The AI failed; this turn falls back to the original menu. */
+		log_add (log_Warning, "AI: converse failed; falling back to menu");
 		PlayerResponseInput (pES);
 		return;
 	}
+
+	log_add (log_Debug, "AI: reply action=%d text=[%.60s]", reply.action,
+			reply.spokenText);
 
 	if (reply.hasAction)
 	{
@@ -1518,15 +1579,21 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 				AiConv_SuppressPhrases (TRUE);
 				SelectResponse (pES);
 				AiConv_SuppressPhrases (FALSE);
-				SpliceTrack (NULL, reply.spokenText, NULL, NULL);
+				AiSpeakGenerated (reply.spokenText);
 				return;
 			}
 		}
 	}
 
 	/* No action taken: pure conversation. The exported actions still stand,
-	 * so the player simply speaks again. */
-	SpliceTrack (NULL, reply.spokenText, NULL, NULL);
+	 * so the player speaks again once this line has been delivered.
+	 *
+	 * TalkingFinished must be cleared or DoCommunication sees nothing
+	 * pending and re-enters text entry immediately, which wipes the line
+	 * before it is ever drawn. SelectResponse does the same thing on the
+	 * menu path. */
+	FeedbackPlayerPhrase (input);
+	AiSpeakGenerated (reply.spokenText);
 }
 
 // Called when the player presses the cancel button in comm.
