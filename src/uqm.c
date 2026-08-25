@@ -416,7 +416,7 @@ int main(int argc, char** argv)
 		INIT_CONFIG_OPTION(  sphereType,        2 ),
 		INIT_CONFIG_OPTION(  nebulaevol,        16 ),
 		INIT_CONFIG_OPTION(  slaughterMode,     false ),
-		INIT_CONFIG_OPTION(  aiConversation,    false ),
+		INIT_CONFIG_OPTION(  aiConversation,    true ),
 		INIT_CONFIG_OPTION(  advancedAutoPilot, false ),
 		INIT_CONFIG_OPTION(  meleeToolTips,     false ),
 		INIT_CONFIG_OPTION(  musicResume,       0 ),
@@ -1326,6 +1326,7 @@ enum
 	SCANSPH_OPT,
 	SLAUGHTER_OPT,
 	AICONV_OPT,
+	NOAICONV_OPT,
 	SISADVAP_OPT,
 	MELEETIPS_OPT,
 	MUSICRESUME_OPT,
@@ -1451,6 +1452,7 @@ static struct option longOptions[] =
 	{"nebulaevol", 1, NULL, NEBUVOL_OPT},
 	{"slaughtermode", 0, NULL, SLAUGHTER_OPT},
 	{"ai", 0, NULL, AICONV_OPT},
+	{"no-ai", 0, NULL, NOAICONV_OPT},
 	{"advancedautopilot", 0, NULL, SISADVAP_OPT},
 	{"meleetooltips", 0, NULL, MELEETIPS_OPT},
 	{"musicresume", 1, NULL, MUSICRESUME_OPT},
@@ -2257,6 +2259,9 @@ parseOptions (int argc, char *argv[], struct options_struct *options)
 				break;
 			case AICONV_OPT:
 				setBoolOption (&options->aiConversation, true);
+				break;
+			case NOAICONV_OPT:
+				setBoolOption (&options->aiConversation, false);
 				break;
 			case SISADVAP_OPT:
 				setBoolOption (&options->advancedAutoPilot, true);

@@ -72,6 +72,10 @@ void AiConv_SetWaitCallback (void (*fn) (void));
  * These become the character's usable knowledge: he may repeat and elaborate
  * on what he has already said, but never volunteer canon he has not reached.
  * That keeps grounding and spoiler control on the same mechanism. */
+/* Why the last AiConv_Converse failed, for showing the player.
+ * Empty when nothing has failed. */
+const char *AiConv_LastError (void);
+
 void AiConv_NoteSpoken (int phraseRef);
 void AiConv_ForgetSpoken (void);
 

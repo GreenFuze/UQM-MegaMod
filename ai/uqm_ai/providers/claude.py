@@ -65,9 +65,27 @@ class ClaudeProvider(LLMProvider):
         try:
             raw = anyio.run(self._complete, system_prompt, user_prompt)
         except Exception as exc:  # noqa: BLE001 - surfaced to the game as an error
-            raise ProviderError(f"claude call failed: {exc}") from exc
+            raise ProviderError(self._describe(exc)) from exc
 
         return self._parse(raw, request)
+
+
+    @staticmethod
+    def _describe(exc: Exception) -> str:
+        """Turn an SDK failure into something a player can act on.
+
+        The SDK reports an expired login as "returned an error result:
+        success", which is worse than useless. An authentication failure is by
+        far the most likely cause of a sudden total outage, so name it and say
+        what to do about it.
+        """
+        text = str(exc)
+        if "error result: success" in text or "authenticate" in text.lower():
+            return (
+                "the Claude CLI could not authenticate - your login has most "
+                "likely expired. Run 'claude' in a terminal and sign in again."
+            )
+        return f"claude call failed: {text}"
 
     async def _complete(self, system_prompt: str, user_prompt: str) -> str:
         options = ClaudeAgentOptions(
