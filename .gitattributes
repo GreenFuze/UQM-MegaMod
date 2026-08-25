@@ -1,0 +1,8 @@
+# AI Edition sources are stored and checked out as LF.
+#
+# Committing CRLF into the blob makes git's autocrlf add a second CR on every
+# checkout, which doubles every line in the working tree and silently breaks
+# any tooling that matches on exact text. Pinning eol here stops that.
+ai/**            text eol=lf
+src/uqm/ai/**    text eol=lf
+docs/**          text eol=lf

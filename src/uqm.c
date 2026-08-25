@@ -46,6 +46,7 @@
 #include "libs/platform.h"
 #include "libs/log.h"
 #include "options.h"
+#include "uqm/ai/aiconv.h"
 #include "uqmversion.h"
 #include "uqm/comm.h"
 #ifdef NETPLAY
@@ -674,6 +675,21 @@ int main(int argc, char** argv)
 	optDirJoy[1] = options.dirJoyP2.value;
 
 	prepareContentDir (options.contentDir, options.addonDir, argv[0]);
+
+	/* Start the AI service before anything is drawn.
+	 *
+	 * Every prerequisite failure so far has surfaced later as a conversation
+	 * that appeared to hang, or as the game quietly behaving like stock
+	 * MegaMod. Checking here turns all of those into one readable refusal at
+	 * startup. The service runs its own checks and prints what to fix. */
+	if (optAiConversation == OPTVAL_ENABLED && !AiConv_Start ())
+	{
+		log_add (log_Fatal, "The AI conversation service could not start."
+				"\n\n%s\n\n"
+				"Start the game with --no-ai to play without AI.",
+				AiConv_LastError ());
+		return EXIT_FAILURE;
+	}
 
 	resolutionFactor = isAddonAvailable (HD_MODE) ?
 		(unsigned int)options.resolutionFactor.value : 0;
