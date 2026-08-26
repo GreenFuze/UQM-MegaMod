@@ -61,7 +61,10 @@ AiProc_Spawn (const char *workingDir, char *errBuf, size_t errCap)
 	PROCESS_INFORMATION pi;
 	HANDLE stdinRd = NULL, stdinWr = NULL;
 	HANDLE stdoutRd = NULL, stdoutWr = NULL;
-	char cmdline[] = "python -m uqm_ai --provider claude";
+	/* --tts canned replays one of Fwiffo's own clips for every line. The
+	 * words do not match; it is here to keep the audio path exercised until
+	 * synthesis exists, and is the first thing to change when it does. */
+	char cmdline[] = "python -m uqm_ai --provider claude --tts canned";
 	char dirBuf[MAX_PATH];
 	const char *dir = resolveWorkingDir (workingDir, dirBuf, sizeof (dirBuf));
 

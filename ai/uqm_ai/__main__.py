@@ -14,7 +14,7 @@ from .dialogue import DialogueFile
 from .persona import FWIFFO, PromptBuilder
 from .phrase_table import PhraseTable, StringsHeader
 from .preflight import Preflight, report
-from .providers.base import LLMProvider, ProviderError
+from .providers.base import LLMProvider, ProviderError, TTSProvider
 from .providers.mock import MockProvider
 from .sidecar import Sidecar
 
@@ -56,6 +56,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--provider", default="mock",
                         choices=["mock", "claude"])
+    parser.add_argument(
+        "--tts",
+        default="none",
+        choices=["none", "canned"],
+        help="'canned' replays one of the character's own clips for every "
+             "line: the words do not match, which is how it proves the audio "
+             "path without a model or a GPU",
+    )
     parser.add_argument(
         "--preflight",
         action="store_true",
@@ -115,7 +123,23 @@ def main(argv: list[str] | None = None) -> int:
     else:
         provider = MockProvider()
 
-    Sidecar(PromptBuilder(profile, table), provider).run()
+    tts: TTSProvider | None = None
+    if args.tts == "canned":
+        from .providers.canned_tts import CannedTTS
+
+        clip = (
+            args.repo.parent
+            / "uqm-megamod-content/addons/mm-3dovoice/spathi/spathi-001.ogg"
+        )
+        try:
+            tts = CannedTTS(clip)
+        except ProviderError as exc:
+            # Speech is optional and subtitles are not. A missing voice pack
+            # must not stop the game from starting, unlike a missing LLM,
+            # which would leave the player typing into nothing.
+            print(f"[uqm-ai] no generated speech: {exc}", file=sys.stderr)
+
+    Sidecar(PromptBuilder(profile, table), provider, tts=tts).run()
     return 0
 
 

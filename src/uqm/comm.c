@@ -1630,33 +1630,43 @@ AiOnWait (void)
 	++aiWaitTicks;
 }
 
-/* Speaks a generated line.
+/* Speaks a generated line, with generated speech when there is any.
  *
  * The subtitle system is entirely track-based: SpliceTrack with a NULL track
  * name only APPENDS to an existing track, and once the previous phrase has
  * finished there is none, so the text is discarded with a warning. A track
  * therefore has to exist, and creating one requires an audio clip.
  *
- * So a canonical clip is borrowed purely as a carrier. The words are ours,
- * the audio is not - which is wrong, and is exactly what the TTS provider
- * will replace. Until then this is what makes generated text visible at all. */
+ * With TTS, the clip IS the line and the words match the voice. Without it, a
+ * canonical clip is borrowed purely as a carrier - the words are ours, the
+ * audio is not - which is what made generated text visible at all before
+ * there was any synthesis. */
 static void
-AiSpeakGenerated (const char *text)
+AiSpeakGenerated (const char *text, const char *clip)
 {
-	UNICODE *carrier;
+	UNICODE *track;
 
-	carrier = GetStringSoundClip (SetAbsStringTableIndex (
-			CommData.ConversationPhrases, 0));
-	if (carrier == NULL)
-	{	/* No voice pack installed: nothing to hang subtitles on. */
-		log_add (log_Warning, "AI: no carrier clip; generated line not shown");
-		return;
+	if (clip != NULL && clip[0] != '\0')
+	{
+		log_add (log_Debug, "AI: speaking with generated clip %s", clip);
+		track = (UNICODE *)clip;
+	}
+	else
+	{
+		track = GetStringSoundClip (SetAbsStringTableIndex (
+				CommData.ConversationPhrases, 0));
+		if (track == NULL)
+		{	/* No voice pack installed: nothing to hang subtitles on. */
+			log_add (log_Warning,
+					"AI: no carrier clip; generated line not shown");
+			return;
+		}
 	}
 
 	StopTrack ();
 	ClearSubtitles ();
 	TalkingFinished = FALSE;
-	SpliceTrack (carrier, (UNICODE *)text, NULL, NULL);
+	SpliceTrack (track, (UNICODE *)text, NULL, NULL);
 }
 
 /* Copies whatever the encounter currently has on offer into the wire form.
@@ -1721,7 +1731,7 @@ AiSetPlayerPhrase (ENCOUNTER_STATE *pES, const UNICODE *text)
  * of its own to say, because the handler's version is the true one. */
 static void
 AiSpeakDispatched (ENCOUNTER_STATE *pES, BYTE responseIndex,
-		const UNICODE *playerInput, const char *provisional)
+		const UNICODE *playerInput, const AI_REPLY *provisional)
 {
 	const char *authored;
 	AI_REPLY narrated;
@@ -1745,7 +1755,7 @@ AiSpeakDispatched (ENCOUNTER_STATE *pES, BYTE responseIndex,
 	if (authored[0] == '\0')
 	{	/* A handler that says nothing has no outcome to describe, so the
 		 * line generated alongside the choice stands. */
-		AiSpeakGenerated (provisional);
+		AiSpeakGenerated (provisional->spokenText, provisional->audioClip);
 		return;
 	}
 
@@ -1757,14 +1767,14 @@ AiSpeakDispatched (ENCOUNTER_STATE *pES, BYTE responseIndex,
 	if (AiConv_Narrate (playerInput, authored, &narrated))
 	{
 		AiLogLong ("narrated as", narrated.spokenText);
-		AiSpeakGenerated (narrated.spokenText);
+		AiSpeakGenerated (narrated.spokenText, narrated.audioClip);
 	}
 	else
 	{	/* The game's own words are always a correct answer; only the
 		 * phrasing is lost. Never fall back to the provisional line, which
 		 * is the one that may contradict what just happened. */
 		log_add (log_Warning, "AI: narrate failed; speaking authored text");
-		AiSpeakGenerated (authored);
+		AiSpeakGenerated (authored, NULL);
 	}
 }
 
@@ -1857,7 +1867,7 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 
 		log_add (log_Warning, "AI: converse failed; falling back to menu");
 		if (why != NULL && why[0] != '\0')
-			AiSpeakGenerated (why);
+			AiSpeakGenerated (why, NULL);
 		PlayerResponseInput (pES);
 		return;
 	}
@@ -1871,7 +1881,7 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 		{
 			if ((int)pES->response_list[i].response_ref == reply.action)
 			{
-				AiSpeakDispatched (pES, (BYTE)i, input, reply.spokenText);
+				AiSpeakDispatched (pES, (BYTE)i, input, &reply);
 				return;
 			}
 		}
@@ -1885,7 +1895,7 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 	 * before it is ever drawn. SelectResponse does the same thing on the
 	 * menu path. */
 	FeedbackPlayerPhrase (pES->phrase_buf);
-	AiSpeakGenerated (reply.spokenText);
+	AiSpeakGenerated (reply.spokenText, reply.audioClip);
 }
 
 // Called when the player presses the cancel button in comm.

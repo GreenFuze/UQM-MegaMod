@@ -64,12 +64,26 @@ typedef struct
 	BOOLEAN repeated;
 } AI_ACTION;
 
+/* Where generated speech is mounted inside the game's virtual filesystem.
+ *
+ * SpliceTrack resolves clip names through contentDir, which is the repository
+ * root, so a directory mounted here is addressable as an ordinary clip path
+ * with no change to the track player. */
+#define AI_VOICE_MOUNT    "uqmai"
+
 /* The sidecar's reply, already validated against the actions we sent. */
 typedef struct
 {
 	char spokenText[AI_MAX_TEXT];
 	int action;          /* chosen RESPONSE_REF, or 0 for none */
 	BOOLEAN hasAction;
+	/* Clip path for the generated speech, ready to hand to SpliceTrack, or
+	 * empty when the sidecar produced no audio.
+	 *
+	 * The sidecar sends a BARE FILENAME and this is built from it. A model
+	 * that emitted "../../../etc/passwd" would therefore be naming a file
+	 * inside the voice directory with a silly name, not escaping it. */
+	char audioClip[128];
 } AI_REPLY;
 
 /* Starts the sidecar and performs the handshake.

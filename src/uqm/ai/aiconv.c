@@ -14,6 +14,9 @@
 #include "aijson.h"
 #include "aiproc.h"
 #include "libs/log.h"
+#include "libs/uio.h"
+
+extern uio_Repository *repository;
 
 /* How long to wait for a reply before abandoning the turn. Generation is
  * slow, but a conversation that never returns is worse than one that falls
@@ -182,6 +185,43 @@ sendLine (const char *line)
 	return (BOOLEAN)AiProc_Write ("\n", 1);
 }
 
+/* Makes the sidecar's scratch directory visible to the track player.
+ *
+ * The sidecar owns the directory - it creates it, writes into it and removes
+ * it on exit - and reports the native path at handshake. Mounting it at the
+ * repository root is what lets SpliceTrack load generated speech: clip names
+ * resolve through contentDir, which is that same root, so "uqmai/line-7.wav"
+ * needs no new decoder path and no change to the track player.
+ *
+ * Failure is not fatal. Speech falls back to the borrowed carrier clip, which
+ * is how every conversation has worked so far. */
+static void
+mountVoiceDir (const char *nativePath)
+{
+	static uio_AutoMount *autoMount[] = { NULL };
+	uio_MountHandle *handle;
+
+	if (nativePath == NULL || nativePath[0] == '\0')
+	{
+		log_add (log_Info, "AI: sidecar reported no voice directory;"
+				" speech will use the carrier clip");
+		return;
+	}
+
+	handle = uio_mountDir (repository, "/" AI_VOICE_MOUNT "/",
+			uio_FSTYPE_STDIO, NULL, NULL, nativePath, autoMount,
+			uio_MOUNT_TOP, NULL);
+	if (handle == NULL)
+	{
+		log_add (log_Warning, "AI: could not mount voice dir '%s'",
+				nativePath);
+		return;
+	}
+
+	log_add (log_Info, "AI: voice dir '%s' mounted at /%s", nativePath,
+			AI_VOICE_MOUNT);
+}
+
 static BOOLEAN
 handshake (void)
 {
@@ -226,6 +266,8 @@ handshake (void)
 	provider = AiJson_GetString (&obj, "provider");
 	log_add (log_Info, "AI: sidecar ready (provider %s)",
 			provider != NULL ? provider : "unknown");
+
+	mountVoiceDir (AiJson_GetString (&obj, "voice_dir"));
 	return TRUE;
 }
 
@@ -268,6 +310,31 @@ BOOLEAN
 AiConv_IsActive (void)
 {
 	return aiActive;
+}
+
+/* Reads the generated speech filename, if the sidecar produced one.
+ *
+ * Only a bare filename is accepted. Anything carrying a path separator is
+ * refused outright rather than sanitised: a name that needs sanitising is a
+ * name we did not expect, and this is the one field where model output could
+ * otherwise reach the filesystem. */
+static void
+readAudioClip (const AiJsonObject *obj, AI_REPLY *reply)
+{
+	const char *name = AiJson_GetString (obj, "audio_file");
+
+	reply->audioClip[0] = '\0';
+	if (name == NULL || name[0] == '\0')
+		return;
+
+	if (strpbrk (name, "/\\:") != NULL)
+	{
+		log_add (log_Warning, "AI: refusing audio filename '%s'", name);
+		return;
+	}
+
+	snprintf (reply->audioClip, sizeof (reply->audioClip), "%s/%s",
+			AI_VOICE_MOUNT, name);
 }
 
 /* Sends one request and parses the reply, which must be of the expected type.
@@ -432,6 +499,7 @@ AiConv_Narrate (const char *playerInput, const char *authoredText,
 	 * been dispatched and its outcome is what this call is describing. */
 	memset (reply, 0, sizeof (*reply));
 	strncpy (reply->spokenText, spoken, AI_MAX_TEXT - 1);
+	readAudioClip (&obj, reply);
 	return TRUE;
 }
 
@@ -495,5 +563,6 @@ AiConv_Converse (const char *playerInput, const AI_ACTION *actions,
 	strncpy (reply->spokenText, spoken, AI_MAX_TEXT - 1);
 	reply->action = action;
 	reply->hasAction = (BOOLEAN)(action != 0);
+	readAudioClip (&obj, reply);
 	return TRUE;
 }

@@ -11,6 +11,7 @@ import sys
 from typing import IO
 
 from .pagination import paginate
+from .voice import VoiceDirectory
 from .persona import PromptBuilder
 from .protocol import (
     MAX_SPOKEN_TEXT,
@@ -48,6 +49,7 @@ class Sidecar:
         self._in = stdin if stdin is not None else sys.stdin
         self._out = stdout if stdout is not None else sys.stdout
         self._log = log if log is not None else sys.stderr
+        self._voice = VoiceDirectory() if tts is not None else None
 
     def run(self) -> None:
         """Serve until stdin closes."""
@@ -92,7 +94,30 @@ class Sidecar:
             "llm": True,
             "tts": self._tts is not None,
             "provider": self._llm.name,
+            # Native path, for the game to mount. Empty when there is no
+            # synthesis, in which case the game keeps using a carrier clip.
+            "voice_dir": self._voice.native_path if self._voice else "",
         }
+
+    def _speak(self, text: str) -> str | None:
+        """Synthesise one line and return its bare filename, or None.
+
+        Called only for text that will actually be spoken. Failure is never
+        fatal: the game shows the subtitle over a carrier clip, which is
+        exactly how it behaved before there was any synthesis at all.
+        """
+        if self._tts is None or self._voice is None:
+            return None
+
+        path, name = self._voice.next_file()
+        try:
+            self._tts.synthesise(text, self._builder.profile.key, str(path))
+        except Exception as exc:  # noqa: BLE001 - a mute line beats a dead turn
+            self._warn(f"synthesis failed, falling back to subtitles: {exc}")
+            return None
+
+        self._voice.prune()
+        return name
 
     def _spoken_keys(self, refs: tuple[int, ...]) -> tuple[str, ...]:
         """The canonical phrases the character has actually spoken.
@@ -131,6 +156,7 @@ class Sidecar:
             "type": "narrate",
             "id": request.id,
             "spoken_text": paginate(spoken),
+            "audio_file": self._speak(spoken),
         }
 
     def _converse(self, request: ConverseRequest) -> dict:
@@ -162,6 +188,13 @@ class Sidecar:
         # times each page itself; one long line overflows the subtitle box.
         payload = response.to_json()
         payload["spoken_text"] = paginate(payload["spoken_text"])
+
+        # Only synthesise what the player will hear. When an action fires the
+        # game discards this prose and asks for a narration of the outcome
+        # instead, so voicing it here would pay for audio nobody plays.
+        if response.action is None:
+            payload["audio_file"] = self._speak(response.spoken_text)
+
         return payload
 
     def _send(self, payload: dict) -> None:
