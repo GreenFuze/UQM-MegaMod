@@ -13,12 +13,15 @@ from typing import IO
 from .pagination import paginate
 from .persona import PromptBuilder
 from .protocol import (
+    MAX_SPOKEN_TEXT,
     PROTOCOL_VERSION,
     ConverseRequest,
+    NarrateRequest,
     ProtocolError,
     ResponseValidator,
     decode_line,
     encode_line,
+    to_display_text,
 )
 from .providers.base import LLMProvider, ProviderError, TTSProvider
 
@@ -66,6 +69,9 @@ class Sidecar:
             if kind == "hello":
                 self._send(self._hello_reply())
                 return
+            if kind == "narrate":
+                self._send(self._narrate(NarrateRequest.from_json(payload)))
+                return
             if kind != "converse":
                 raise ProtocolError(f"unknown message type {kind!r}")
 
@@ -88,21 +94,54 @@ class Sidecar:
             "provider": self._llm.name,
         }
 
+    def _spoken_keys(self, refs: tuple[int, ...]) -> tuple[str, ...]:
+        """The canonical phrases the character has actually spoken.
+
+        Those are what he may draw on: he can repeat and elaborate on his own
+        words, but cannot volunteer canon he has not reached. This is what
+        keeps grounding and spoiler control on the same mechanism.
+        """
+        return tuple(
+            key
+            for key in (self._builder.key_for_ref(ref) for ref in refs)
+            if key is not None
+        )
+
+    def _narrate(self, request: NarrateRequest) -> dict:
+        """Reword an outcome the encounter has already produced and applied.
+
+        Nothing is chosen here and nothing is validated against an action
+        list, because there is no decision left: the handler ran, the state
+        changed, and this call only decides how it sounds.
+        """
+        prompt = self._builder.render(
+            permitted_keys=self._spoken_keys(request.spoken_refs),
+            memory=(),
+            visits=0,
+        )
+
+        spoken = to_display_text(self._llm.narrate(request, prompt).strip())
+        if not spoken:
+            raise ProtocolError("narrate produced no text")
+        if len(spoken) > MAX_SPOKEN_TEXT:
+            self._warn(f"request {request.id}: narration truncated")
+            spoken = spoken[:MAX_SPOKEN_TEXT]
+
+        return {
+            "type": "narrate",
+            "id": request.id,
+            "spoken_text": paginate(spoken),
+        }
+
     def _converse(self, request: ConverseRequest) -> dict:
         # The game identifies actions by numeric RESPONSE_REF, since enum
         # names do not exist at runtime in C. Resolve them so the persona and
         # the provider can reason about names.
         request = request.with_resolved_keys(self._builder.key_for_ref)
 
-        # The game reports which canonical phrases the character has actually
-        # spoken. Those are what he may draw on: he can repeat and elaborate
-        # on his own words, but cannot volunteer canon he has not reached.
-        spoken_keys = tuple(
-            key
-            for key in (self._builder.key_for_ref(ref) for ref in request.spoken_refs)
-            if key is not None
+        permitted = request.available_knowledge or self._spoken_keys(
+            request.spoken_refs
         )
-        permitted = request.available_knowledge or spoken_keys
 
         prompt = self._builder.render(
             permitted_keys=permitted,

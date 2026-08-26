@@ -3,7 +3,8 @@
 Design for the AI conversation layer, derived from the source trace in
 [fwiffo-conversation-flow.md](fwiffo-conversation-flow.md).
 
-Status: design. Nothing here is implemented yet.
+Status: implemented for the Fwiffo/Pluto encounter. Sections marked as designed only
+(memory, voice) are not built yet.
 
 ---
 
@@ -88,8 +89,30 @@ Game to sidecar:
 }
 ```
 
-Every field of `actions` comes straight from `pES->response_list` — id, canonical text,
-and whether its callback is `ExitConversation`. Nothing is hand-maintained per race.
+Every field of `actions` comes straight from `pES->response_list` — id and canonical text.
+Nothing is hand-maintained per race.
+
+> `terminal` is currently always `false` on the wire, and cannot be filled in:
+> `ExitConversation` is a *static* function defined separately in each race's comm file,
+> so there is no symbol `comm.c` could compare `response_func` against.
+
+`flow` carries the signal `terminal` cannot. `SelectResponse` remembers the handler it
+dispatched; a response registered during that call whose own handler is that same function
+returns to exactly this point (`flow: 1`), and one with a different handler departs
+(`flow: 2`). Before anything has been dispatched it is `0`, unknown. This needs nothing
+per race and no registry.
+
+**Willingness gates departures only.** A `flow: 1` action fires whether or not the model is
+willing, because it cannot commit the player to anything and the encounter answers it in
+authored words regardless. Withholding those only deadlocks the conversation.
+
+`flow` alone must not be read as "this is a dead end". Fwiffo's `join_us` and his
+`what_doing_on_pluto_1` are both wired back to `SpathiOnPluto`, yet one repeats forever and
+the other is consumed the moment it is used. `repeated` is what separates them, and it is
+observed rather than inferred: **an action the encounter consumes disappears from the next
+list; one that comes back was not consumed.** The game tracks which refs have been
+dispatched this conversation ([aiconv.h](../src/uqm/ai/aiconv.h)) and marks a ref that is
+still on offer after being chosen.
 
 Sidecar to game:
 
@@ -107,7 +130,81 @@ Sidecar to game:
 `action` is either `null` or exactly one `id` from the actions list in the request.
 `remember` is an optional one-line summary fragment (see section 5).
 
-### 3.3 Errors
+`spoken_text` from this message is used **only when no action was taken**. When an action
+fires, the outcome has not happened yet at the time this text was written, so it is
+discarded in favour of 3.4.
+
+### 3.3 The authored order is not a constraint on free text
+
+The response menu could show eight lines ([`MAX_RESPONSES`](../src/uqm/comm.c)), so races
+expose their topics through `if / else if` chains — one of each group at a time. That is a
+UI budget, not fiction, and AI mode deleted the menu while keeping the budget.
+
+Spathi's recruitment gate was the same kind of artefact:
+
+```c
+if (!PHRASE_ENABLED (full_of_monsters))    /* i.e. once the chain was walked */
+    Response (join_us, ExitConversation);
+else
+    Response (join_us, SpathiOnPluto);     /* refuse, no matter the argument */
+```
+
+With a menu that reads as "he needs convincing". With free text it reads as "he cannot be
+convinced", because the player opens wherever they like and every attempt lands on the
+refusal branch. In AI mode the encounter therefore exports the real one unconditionally,
+alongside a peaceful goodbye, and Fwiffo's own willingness decides.
+
+Nothing about game authority moves: `ExitConversation` is still what calls `AddEscortShips`,
+and `EscortFeasibilityStudy` can still refuse a full fleet. What moved is **consent**, which
+is characterisation rather than state. The persona carries the bar — concrete reasons to
+feel safer, not charm — so a first-message recruitment is possible if the argument is
+genuinely good, and impossible if it is not.
+
+The question chain survives as **evidence rather than a lock**: draw out that he is alone
+and terrified, and the argument becomes one he will accept.
+
+> An earlier revision instead fed the still-unasked topics into `narrate` so he could nudge
+> the player towards them. It worked, and it was wrong — being herded back onto the authored
+> order is exactly what free text exists to escape. It was removed.
+
+### 3.4 Narration — saying what the encounter decided
+
+An action's outcome is not knowable before it is dispatched. The same `join_us` refuses or
+recruits depending on `join_us_refusals` and on which questions have been exhausted, and
+none of that is visible to the model. Generating prose first therefore allowed the reply
+"yes, I will join you" on a turn where the handler ran `WONT_JOIN_1` — and because the
+canonical line was suppressed, the player was promised something and then saw nothing
+happen at all. That is not a state-authority breach in the usual direction; the AI changed
+no state. It narrated a state change that did not occur, which the player cannot tell apart
+from a bug.
+
+So the order is inverted. The handler is dispatched **first**, with `NPCPhrase` capturing
+its text instead of speaking it, and only then is the model asked to reword what the
+encounter actually said:
+
+```json
+{
+  "type": "narrate",
+  "id": 43,
+  "player_input": "Join us. We will keep you safe.",
+  "authored_text": "Leave Pluto? Out there is where the monsters are! No...",
+  "spoken_refs": [1, 5, 61]
+}
+```
+
+```json
+{"type": "narrate", "id": 43, "spoken_text": "Leave Pluto?! Leave my *base*?! ..."}
+```
+
+There is no `action` field in either direction: the action has already been taken, and
+this call decides only how it sounds. The model may change wording, rhythm and length; it
+may not change the meaning. If the call fails for any reason the game speaks
+`authored_text` verbatim, which is always a correct answer — only the phrasing is lost.
+
+Consequence: an action turn costs two model calls. That is the price of never lying about
+what happened, and only the second call is on the critical path for correctness.
+
+### 3.5 Errors
 
 ```json
 {"type":"error","id":42,"code":"llm_timeout","message":"provider did not respond in 20s"}

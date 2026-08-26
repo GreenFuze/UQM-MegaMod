@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import zlib
 
-from ..protocol import ConverseRequest, ConverseResponse
+from ..protocol import ConverseRequest, ConverseResponse, NarrateRequest
 from .base import LLMProvider
 
 # Player intent -> the action id it should select, when that action is
@@ -118,6 +118,16 @@ class MockProvider(LLMProvider):
             action=chosen.ref if chosen else None,
             remember=remember,
         )
+
+    def narrate(self, request: NarrateRequest, system_prompt: str) -> str:
+        """Return the authored answer unchanged.
+
+        Rewording is the model's job and cannot be faked deterministically.
+        Returning it verbatim is the correct degenerate case, and it lets the
+        integration tests assert that the encounter's outcome - not an
+        invented one - is what reaches the player.
+        """
+        return request.authored_text
 
     @staticmethod
     def _select_action(request: ConverseRequest):

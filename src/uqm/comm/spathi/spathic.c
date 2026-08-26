@@ -22,6 +22,7 @@
 
 #include "uqm/build.h"
 #include "uqm/lua/luacomm.h"
+#include "uqm/ai/aiconv.h"
 
 
 static LOCDATA spathi_desc =
@@ -400,7 +401,36 @@ SpathiOnPluto (RESPONSE_REF R)
 	else if (PHRASE_ENABLED (what_about_yourself))
 		Response (what_about_yourself, SpathiOnPluto);
 
-	if (!PHRASE_ENABLED (full_of_monsters))
+	if (AiConv_IsActive ())
+	{	/* In AI mode the offer is always real, and whether Fwiffo takes it
+		 * is his decision rather than a question of how many topics have
+		 * been ticked off.
+		 *
+		 * The original gate - recruitment only once full_of_monsters had
+		 * been asked - encoded the authored order the response menu walked
+		 * you down. Free text lets the captain open anywhere, so that gate
+		 * stopped reading as "he needs convincing" and started reading as
+		 * "he cannot be convinced": join_us dispatched to the refusal
+		 * branch every time, no matter how good the argument.
+		 *
+		 * Nothing about game authority changes. The encounter still decides
+		 * what happens - EscortFeasibilityStudy can still refuse a full
+		 * fleet, and ExitConversation is still what adds the ship. What
+		 * moved is consent, which is characterisation, not state.
+		 *
+		 * The question chain is now evidence rather than a lock: draw out
+		 * that he is alone and terrified and the argument becomes one he
+		 * will actually accept.
+		 *
+		 * There must also be a way to walk away. Canon offers no peaceful
+		 * exit here - every other ending is combat - which is survivable
+		 * with a menu you can read and cruel without one. GOODBYE_FRIENDLY_SPACE
+		 * is existing voiced Spathi content and ExitConversation already
+		 * handles it, so this costs no new writing. */
+		Response (join_us, ExitConversation);
+		Response (bye_friendly_space, ExitConversation);
+	}
+	else if (!PHRASE_ENABLED (full_of_monsters))
 		Response (join_us, ExitConversation);
 	else
 		Response (join_us, SpathiOnPluto);

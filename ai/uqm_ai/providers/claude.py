@@ -18,7 +18,7 @@ import re
 
 import anyio
 
-from ..protocol import ConverseRequest, ConverseResponse
+from ..protocol import ConverseRequest, ConverseResponse, NarrateRequest
 from .base import LLMProvider, ProviderError
 
 try:  # The SDK is optional; the mock must still work without it.
@@ -97,6 +97,53 @@ class ClaudeProvider(LLMProvider):
         return response
 
 
+    def narrate(self, request: NarrateRequest, system_prompt: str) -> str:
+        prompt = self._build_narrate_prompt(request)
+
+        try:
+            raw = anyio.run(self._complete, system_prompt, prompt)
+        except Exception as exc:  # noqa: BLE001 - surfaced to the game as an error
+            raise ProviderError(self._describe(exc, self._last_result)) from exc
+
+        text = (raw or "").strip()
+        if not text:
+            raise ProviderError("claude returned no text for narrate")
+
+        # No JSON here. There is no decision left to make, so asking for a
+        # structured object would only add a way for the turn to fail.
+        return text
+
+    @staticmethod
+    def _build_narrate_prompt(request: NarrateRequest) -> str:
+        return "\n".join(
+            [
+                "The captain just said to you:",
+                f'"{request.player_input}"',
+                "",
+                "This is what you say back. It is already settled - it is what "
+                "actually happens, not a suggestion:",
+                "",
+                request.authored_text,
+                "",
+                "Say exactly that, in your own voice, as though you had just "
+                "thought of it. You may change the wording, the rhythm and the "
+                "length, and you may react to what the captain actually said.",
+                "",
+                "You may NOT change what it means. If it is a refusal, you are "
+                "refusing. If it is agreement, you are agreeing. If it names a "
+                "fact, that fact is true. Do not soften a no into a maybe, and "
+                "never turn a no into a yes: the game has already acted on the "
+                "meaning, so a reply that says otherwise leaves the captain "
+                "believing something that did not happen.",
+                "",
+                "Add no new facts - no Spathi history, names or places that are "
+                "not above or already said by you.",
+                "",
+                "Reply with the spoken words only. No JSON, no quotation marks "
+                "around the whole thing, no narration of your actions.",
+            ]
+        )
+
     @staticmethod
     def _describe(exc: Exception, last_result: str = "") -> str:
         """Turn an SDK failure into something a player can act on.
@@ -161,8 +208,12 @@ class ClaudeProvider(LLMProvider):
             "NOT your own lines, and you must never speak them yourself."
         )
         for action in request.actions:
-            ending = " [would end the conversation]" if action.terminal else ""
-            lines.append(f'  {action.ref} = the captain means: "{action.text}"{ending}')
+            note = ""
+            if action.is_consequential:
+                note = " [CONSEQUENTIAL - changes everything]"
+            elif action.changes_nothing:
+                note = " [you have answered this already; it changes nothing]"
+            lines.append(f'  {action.ref} = the captain means: "{action.text}"{note}')
         lines.append("")
         lines.append(
             "Decide two things: which of those lines this exchange corresponds "
@@ -185,6 +236,42 @@ class ClaudeProvider(LLMProvider):
             "match so things progress. Precision matters far more for the "
             "lines that end the conversation - only pick one of those if the "
             "captain clearly means it."
+        )
+        lines.append(
+            "A line marked [CONSEQUENTIAL - changes everything] is not "
+            "reversible. Match one ONLY if the captain plainly and "
+            "unmistakably says that thing - never because his words touch the "
+            "same subject. Someone who mentions killing, weapons or a past "
+            "attack while ARGUING, defending himself, asking a rhetorical "
+            "question, or reasoning about what you believe is having a "
+            "discussion, not making a declaration. If you find yourself about "
+            "to write 'if you have decided to attack me', you have not been "
+            "told that he has: choose null, or a line that opens something "
+            "up, and let him say it outright if he means it."
+        )
+        lines.append(
+            "A line marked [you have answered this already] is one you have "
+            "been asked before and answered, and the answer has not changed. "
+            "You are NOT going to end up agreeing to it this time either, "
+            "however well the captain argues. Still match it if that is "
+            "plainly what he means - he deserves a real answer rather than "
+            "silence - but promise nothing, and refuse the way you would "
+            "actually refuse: frightened, over-explaining, faintly "
+            "apologetic, and steering him towards something you CAN talk "
+            "about."
+        )
+        lines.append(
+            "When the captain's words fit more than one line, prefer the one "
+            "that is NOT marked. A captain who asks you a question and also "
+            "makes a plea has done both, and the plea is the part you have "
+            "already answered - so answer the question. Unmarked lines are "
+            "the ones that take the conversation somewhere; keep returning "
+            "to a marked one and the two of you simply circle."
+        )
+        lines.append(
+            "Never mention any of this to the captain. He cannot see the "
+            "lines, the numbers or the markings, and a character who talks "
+            "about them stops being a character. Speak only as yourself."
         )
         lines.append(
             "If the captain asks for something that is NOT on the list - to "
@@ -249,7 +336,20 @@ class ClaudeProvider(LLMProvider):
         if not isinstance(willing, bool):
             willing = matched is not None
 
-        action = matched if (matched is not None and willing) else None
+        chosen = next((a for a in request.actions if a.ref == matched), None)
+
+        # Willingness gates only the lines that lead somewhere. One that
+        # returns to the same point in the conversation cannot commit him to
+        # anything - the encounter answers it in its own authored words
+        # either way - and withholding it is how this used to deadlock:
+        # nothing advanced, so the line that WOULD let him join never became
+        # available and recruitment was impossible.
+        if chosen is None:
+            action = None
+        elif chosen.stays_here or willing:
+            action = chosen.ref
+        else:
+            action = None
 
         remember = payload.get("remember")
         if not isinstance(remember, str) or not remember.strip():

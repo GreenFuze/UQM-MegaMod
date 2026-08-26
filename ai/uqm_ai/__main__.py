@@ -28,7 +28,24 @@ _CHARACTERS = {
 }
 
 
+def _use_utf8_wire() -> None:
+    """Pin stdio to UTF-8 before a single byte is written.
+
+    Python picks the console code page on Windows - cp1252 here - so any
+    non-ASCII character in a reply was silently transcoded into a byte the
+    game could not render, and anything the code page cannot represent at all
+    would raise mid-write and take the turn with it. The protocol is UTF-8;
+    say so rather than inheriting whatever the console happens to be.
+    """
+    for stream in (sys.stdin, sys.stdout):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", newline="\n")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _use_utf8_wire()
+
     parser = argparse.ArgumentParser(prog="uqm_ai")
     parser.add_argument("--character", default="fwiffo", choices=sorted(_CHARACTERS))
     parser.add_argument(

@@ -20,16 +20,48 @@
 
 #define AI_MAX_ACTIONS    24
 #define AI_MAX_TEXT       2048
+/* One dispatch can emit several canonical phrases in a row, and all of them
+ * together are the authored answer. */
+#define AI_MAX_AUTHORED   4096
 /* Players write paragraphs, not commands. A cap that stops them
  * mid-argument is worse than a longer request. */
 #define AI_MAX_INPUT      2048
+
+/* Where an action leads, relative to the point the conversation is at now.
+ *
+ * A response whose handler is the same function that registered it returns to
+ * exactly this point: it cannot end the encounter and cannot commit the
+ * player to anything, because the node simply re-registers itself. One with a
+ * different handler is a departure - recruitment, combat, or a new topic.
+ *
+ * This is how the model learns which "come with us" is real. Fwiffo's join_us
+ * is wired to SpathiOnPluto while the question chain is unspent, and only to
+ * ExitConversation once it is spent; the difference is precisely whether he
+ * refuses. Comparing against ExitConversation by name is impossible - it is
+ * static in every race's comm file - but comparing against the current node
+ * costs nothing and needs nothing per race. */
+#define AI_FLOW_UNKNOWN    0  /* nothing has been dispatched yet */
+#define AI_FLOW_SAME_NODE  1  /* returns here; nothing new opens up */
+#define AI_FLOW_DEPARTS    2  /* leads elsewhere; may end the conversation */
 
 /* One action the encounter has exported this turn. */
 typedef struct
 {
 	int ref;             /* RESPONSE_REF; what the game dispatches on */
 	const char *text;    /* canonical wording, for the model's benefit */
-	BOOLEAN terminal;    /* handler is ExitConversation */
+	/* Whether the handler is the encounter's ExitConversation.
+	 *
+	 * Currently always FALSE, and cannot be computed: ExitConversation is a
+	 * static function defined separately in every race's comm file, so there
+	 * is no symbol comm.c could compare response_func against. The field is
+	 * kept because the outcome now reaches the model a better way - see
+	 * AiConv_Narrate - and a per-race registry would buy nothing. */
+	BOOLEAN terminal;
+	int flow;            /* one of AI_FLOW_* */
+	/* Dispatched earlier this conversation and still on offer, which proves
+	 * the encounter did not consume it: choosing it again changes nothing.
+	 * See AiConv_NoteDispatched. */
+	BOOLEAN repeated;
 } AI_ACTION;
 
 /* The sidecar's reply, already validated against the actions we sent. */
@@ -60,11 +92,33 @@ BOOLEAN AiConv_IsActive (void);
 BOOLEAN AiConv_Converse (const char *playerInput, const AI_ACTION *actions,
 		int numActions, int visits, AI_REPLY *reply);
 
-/* While suppressed, NPCPhrase() emits nothing.
+/* Renders the encounter's own answer in the character's voice.
  *
- * Generated prose replaces the canonical line rather than accompanying it, so
- * the encounter handler is dispatched with phrases muted: its state changes
- * still happen, but its authored text does not appear alongside the AI's. */
+ * Dispatching an action is what decides the outcome, and the handler says so
+ * in authored text: WONT_JOIN when he refuses, WILL_JOIN when he does not.
+ * Generating prose BEFORE that dispatch let the model agree to things the
+ * encounter then refused, which the player saw as a promise followed by
+ * nothing. So the authored answer is captured during dispatch and passed
+ * here, and the model is only allowed to reword it.
+ *
+ * Nothing is chosen here and no action list is sent. An earlier revision
+ * passed one so he could nudge the captain towards a topic he had not raised
+ * yet; it worked, and it was wrong. Being herded back onto the authored order
+ * is precisely what free text exists to escape.
+ *
+ * Returns FALSE on any failure, in which case the caller must speak the
+ * authored text verbatim: the game's own words are always a correct answer,
+ * and only the phrasing is lost. */
+BOOLEAN AiConv_Narrate (const char *playerInput, const char *authoredText,
+		AI_REPLY *reply);
+
+/* While suppressed, NPCPhrase() speaks nothing and hands its text to
+ * AiConv_CaptureText instead.
+ *
+ * Generated prose replaces the canonical delivery rather than accompanying
+ * it, so the encounter handler is dispatched with phrases muted: its state
+ * changes still happen and its words are still recorded, but the player hears
+ * one line rather than two contradicting ones. */
 /* Installed by the game; called repeatedly while waiting for a reply so the
  * conversation screen keeps animating instead of appearing hung. */
 void AiConv_SetWaitCallback (void (*fn) (void));
@@ -81,7 +135,29 @@ const char *AiConv_LastError (void);
 void AiConv_NoteSpoken (int phraseRef);
 void AiConv_ForgetSpoken (void);
 
+/* Records that the player has dispatched an action.
+ *
+ * A ref that is STILL on offer after being dispatched was not consumed by
+ * the encounter: choosing it again gives the same kind of answer and moves
+ * nothing. join_us behaves that way until its question chain is spent, while
+ * what_doing_on_pluto_1 is disabled the moment it is used and never returns.
+ * Structure alone cannot tell those apart - both are wired back to the same
+ * handler - so this is observed instead of guessed. */
+void AiConv_NoteDispatched (int responseRef);
+BOOLEAN AiConv_WasDispatched (int responseRef);
+void AiConv_ForgetDispatched (void);
+
 void AiConv_SuppressPhrases (BOOLEAN suppress);
 BOOLEAN AiConv_PhrasesSuppressed (void);
+
+/* Records one suppressed canonical line. Successive calls accumulate, since
+ * a single dispatch may emit several phrases in sequence. */
+void AiConv_CaptureText (const char *text);
+
+/* Everything captured since the last AiConv_ClearCaptured, or "" if the
+ * handler produced no dialogue at all. Never NULL. */
+const char *AiConv_CapturedText (void);
+
+void AiConv_ClearCaptured (void);
 
 #endif /* UQM_AI_AICONV_H */

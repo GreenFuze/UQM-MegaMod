@@ -1408,6 +1408,10 @@ ClearResponses (ENCOUNTER_STATE *pES)
 	}
 }
 
+/* The handler that registered the responses currently on offer, or NULL
+ * before anything has been dispatched. Only read by the AI path. */
+static RESPONSE_FUNC aiCurrentNode = NULL;
+
 // Called when the player presses the select button on a response.
 static void
 SelectResponse (ENCOUNTER_STATE *pES)
@@ -1442,27 +1446,125 @@ SelectResponse (ENCOUNTER_STATE *pES)
 	TalkingFinished = FALSE;
 	pES->num_responses = 0;
 	ClearResponses (pES);
+	/* Remembered before the call, so the responses it goes on to register can
+	 * be told apart: one pointing back at this same handler returns here,
+	 * one pointing elsewhere departs. See AI_FLOW_* in aiconv.h. */
+	aiCurrentNode = pES->response_list[pES->cur_response].response_func;
 	(*pES->response_list[pES->cur_response].response_func)
 			(pES->response_list[pES->cur_response].response_ref);
 }
 
 
 static void PlayerResponseInput (ENCOUNTER_STATE *pES);
+static void SelectConversationSummary (ENCOUNTER_STATE *pES);
+static void SelectReplay (ENCOUNTER_STATE *pES);
 
 /* ---- AI Edition ------------------------------------------------------- */
 
 static int aiWaitTicks;
 
+/* Set by the input frame callback to end text entry for a reason other than
+ * the player finishing a line. DoTextEntry has no way to report one. */
+static BOOLEAN aiReplayRequested;
+
+/* Where the caret was on the previous input frame, so a Left that moved it
+ * can be told from a Left pressed with nowhere left to move. */
+static int aiLastCaretByte;
+
+/* Logs text of any length.
+ *
+ * log_add silently truncates at MAX_LOG_ENTRY_SIZE, and a %.60s in the format
+ * string truncates further still. Both were in this file, and both cut off
+ * exactly the part that matters: what the player actually wrote, and what the
+ * character actually said back. A log that ends mid-sentence cannot settle an
+ * argument about whether a reply matched the encounter's outcome.
+ *
+ * Long text is therefore emitted in pieces, broken at a newline where one is
+ * near enough, since generated prose is already paginated on newlines. */
+static void
+AiLogLong (const char *label, const char *text)
+{
+	/* Well inside MAX_LOG_ENTRY_SIZE (1024) once the label and the log's own
+	 * prefix are accounted for. */
+	const size_t chunkMax = 700;
+	size_t remaining;
+	int part = 0;
+
+	if (text == NULL)
+		text = "";
+	remaining = strlen (text);
+
+	if (remaining == 0)
+	{
+		log_add (log_Debug, "AI: %s: (empty)", label);
+		return;
+	}
+
+	while (remaining > 0)
+	{
+		char piece[768];
+		size_t take = remaining < chunkMax ? remaining : chunkMax;
+
+		if (take == chunkMax)
+		{	/* Prefer a line break, but only a late one: an early break would
+			 * produce a page of one-word log lines. */
+			size_t i;
+
+			for (i = take; i > chunkMax / 2; --i)
+			{
+				if (text[i - 1] == '\n')
+				{
+					take = i;
+					break;
+				}
+			}
+		}
+
+		memcpy (piece, text, take);
+		piece[take] = '\0';
+
+		if (part == 0 && take == remaining)
+			log_add (log_Debug, "AI: %s: %s", label, piece);
+		else
+			log_add (log_Debug, "AI: %s [%d]: %s", label, part, piece);
+
+		text += take;
+		remaining -= take;
+		++part;
+	}
+}
+
 /* Draws the line being typed, with a caret so the field reads as editable.
  * FeedbackPlayerPhrase is what the menu path uses to show the chosen
- * response, so the typed line appears in the same place. */
+ * response, so the typed line appears in the same place.
+ *
+ * caretByte is the insertion point as a BYTE offset into text, which is what
+ * DoTextEntry maintains in pTES->InsPt - and therefore always lands on a
+ * UTF-8 character boundary. Appending the caret instead made editing look
+ * broken in a way that was easy to miss: typing and deleting behaved
+ * correctly while the caret sat at the end of the line regardless of where
+ * the cursor really was. */
 static void
-AiShowInput (const UNICODE *text, BOOLEAN caret)
+AiShowInput (const UNICODE *text, int caretByte)
 {
-	UNICODE buf[AI_MAX_INPUT + 4];
+	UNICODE buf[AI_MAX_INPUT + 8];
+	int len = (int)strlen (text);
 
-	snprintf (buf, sizeof (buf), "%s%s", text, caret ? "_" : " ");
+	if (caretByte < 0 || caretByte > len)
+		caretByte = len;
+
+	snprintf (buf, sizeof (buf), "%.*s_%s", caretByte, text,
+			text + caretByte);
 	FeedbackPlayerPhrase (buf);
+}
+
+/* The insertion point as a byte offset, for AiShowInput. */
+static int
+AiCaretByte (TEXTENTRY_STATE *pTES)
+{
+	if (pTES->InsPt == NULL || pTES->InsPt < pTES->BaseStr)
+		return 0;
+	return (int)(pTES->InsPt - pTES->BaseStr);
 }
 
 /* Called when the text actually changes. Redrawing on every frame instead
@@ -1470,7 +1572,7 @@ AiShowInput (const UNICODE *text, BOOLEAN caret)
 static BOOLEAN
 OnAiInputChange (TEXTENTRY_STATE *pTES)
 {
-	AiShowInput (pTES->BaseStr, TRUE);
+	AiShowInput (pTES->BaseStr, AiCaretByte (pTES));
 	return TRUE;
 }
 
@@ -1485,9 +1587,30 @@ OnAiInputChange (TEXTENTRY_STATE *pTES)
 static BOOLEAN
 OnAiInputFrame (TEXTENTRY_STATE *pTES)
 {
-	(void) pTES;
 	UpdateDuty (FALSE);
 	UpdateAnimations (FALSE);
+
+	/* Left replays the last thing said, as it does in the response menu -
+	 * but only once the cursor has nowhere further left to go.
+	 *
+	 * Claiming the key outright would cost cursor movement inside a
+	 * paragraph, and claiming it only on an empty line meant that editing
+	 * anything at all took replay away. Requiring the caret to ALREADY be at
+	 * the start settles it: walking left through the line moves the caret,
+	 * and one more press past the start replays. An empty line is at the
+	 * start by definition, so there it replays immediately.
+	 *
+	 * DoTextEntry has already handled this frame's Left by the time we run,
+	 * so the previous position is what distinguishes "just arrived at the
+	 * start" from "was already there". */
+	if (PulsedInputState.menu[KEY_MENU_LEFT]
+			&& AiCaretByte (pTES) == 0 && aiLastCaretByte == 0)
+	{
+		aiReplayRequested = TRUE;
+		return FALSE;
+	}
+	aiLastCaretByte = AiCaretByte (pTES);
+
 	return TRUE;
 }
 
@@ -1536,6 +1659,115 @@ AiSpeakGenerated (const char *text)
 	SpliceTrack (carrier, (UNICODE *)text, NULL, NULL);
 }
 
+/* Copies whatever the encounter currently has on offer into the wire form.
+ *
+ * Called twice per turn against two different lists: once before the player
+ * types, and again after dispatch, when the handler has registered whatever
+ * comes next. Returns how many were written. */
+static COUNT
+AiExportActions (ENCOUNTER_STATE *pES, AI_ACTION *actions, COUNT cap)
+{
+	COUNT count = 0;
+	COUNT i;
+
+	for (i = 0; i < pES->num_responses && count < cap; ++i)
+	{
+		actions[count].ref = (int)pES->response_list[i].response_ref;
+		actions[count].text = pES->response_list[i].response_text.pStr;
+		actions[count].terminal = FALSE;
+		actions[count].repeated =
+				AiConv_WasDispatched (actions[count].ref);
+
+		if (aiCurrentNode == NULL)
+			actions[count].flow = AI_FLOW_UNKNOWN;
+		else if (pES->response_list[i].response_func == aiCurrentNode)
+			actions[count].flow = AI_FLOW_SAME_NODE;
+		else
+			actions[count].flow = AI_FLOW_DEPARTS;
+
+		++count;
+	}
+
+	return count;
+}
+
+/* Records the player's own words as this turn's phrase, and shows them.
+ *
+ * The grey line under the comm window, SelectReplay and the conversation
+ * summary all read pES->phrase_buf. SelectResponse fills it with the
+ * CANONICAL wording of whichever action was dispatched - which in AI mode is
+ * a line the player never wrote, close enough to theirs to be mistaken for
+ * it, and wrong. What the player actually typed belongs there instead. */
+static void
+AiSetPlayerPhrase (ENCOUNTER_STATE *pES, const UNICODE *text)
+{
+	utf8StringCopy (pES->phrase_buf, sizeof (pES->phrase_buf),
+			(UNICODE *)text);
+	FeedbackPlayerPhrase (pES->phrase_buf);
+}
+
+/* Dispatches a chosen action and speaks the outcome the encounter produced.
+ *
+ * Order matters and is the whole point. The encounter decides what happens:
+ * the same join_us dispatches to a refusal or to actually joining depending
+ * on state the model cannot see. Generating prose first therefore let it
+ * agree to something the handler went on to refuse, and because the
+ * canonical refusal was suppressed the player saw a promise and then
+ * nothing at all - which is exactly what a bug looks like.
+ *
+ * So the handler runs first with its phrases captured rather than spoken,
+ * and the model is then asked only to say THAT in character. The provisional
+ * line from the first call is discarded whenever the handler had something
+ * of its own to say, because the handler's version is the true one. */
+static void
+AiSpeakDispatched (ENCOUNTER_STATE *pES, BYTE responseIndex,
+		const UNICODE *playerInput, const char *provisional)
+{
+	const char *authored;
+	AI_REPLY narrated;
+
+	pES->cur_response = responseIndex;
+	AiConv_NoteDispatched (
+			(int)pES->response_list[responseIndex].response_ref);
+
+	AiConv_ClearCaptured ();
+	AiConv_SuppressPhrases (TRUE);
+	SelectResponse (pES);
+	AiConv_SuppressPhrases (FALSE);
+
+	/* SelectResponse has just overwritten the phrase with the canonical
+	 * wording; put the player's own line back before it is seen. */
+	AiSetPlayerPhrase (pES, playerInput);
+
+	authored = AiConv_CapturedText ();
+	AiLogLong ("encounter answered", authored);
+
+	if (authored[0] == '\0')
+	{	/* A handler that says nothing has no outcome to describe, so the
+		 * line generated alongside the choice stands. */
+		AiSpeakGenerated (provisional);
+		return;
+	}
+
+	/* Re-armed so the second call announces itself too. Without this the
+	 * player sits through a second generation with no sign anything is
+	 * happening, having already seen "(transmitting...)" come and go. */
+	aiWaitTicks = 0;
+
+	if (AiConv_Narrate (playerInput, authored, &narrated))
+	{
+		AiLogLong ("narrated as", narrated.spokenText);
+		AiSpeakGenerated (narrated.spokenText);
+	}
+	else
+	{	/* The game's own words are always a correct answer; only the
+		 * phrasing is lost. Never fall back to the provisional line, which
+		 * is the one that may contradict what just happened. */
+		log_add (log_Warning, "AI: narrate failed; speaking authored text");
+		AiSpeakGenerated (authored);
+	}
+}
+
 /* One AI-mode conversational turn, replacing the response menu.
  *
  * The action set handed to the sidecar is exactly what the encounter
@@ -1552,13 +1784,7 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 	COUNT i;
 	BOOLEAN entered;
 
-	for (i = 0; i < pES->num_responses && count < AI_MAX_ACTIONS; ++i)
-	{
-		actions[count].ref = (int)pES->response_list[i].response_ref;
-		actions[count].text = pES->response_list[i].response_text.pStr;
-		actions[count].terminal = FALSE;
-		++count;
-	}
+	count = AiExportActions (pES, actions, AI_MAX_ACTIONS);
 
 	input[0] = '\0';
 	memset (&tes, 0, sizeof (tes));
@@ -1571,30 +1797,55 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 	tes.FrameCallback = OnAiInputFrame;
 
 	for (i = 0; i < count; ++i)
-		log_add (log_Debug, "AI: offering ref %d [%.40s]", actions[i].ref,
-				actions[i].text != NULL ? actions[i].text : "");
+	{
+		static const char *flowName[] = { "unknown", "same-node", "departs" };
+		char label[80];
+
+		sprintf (label, "offering ref %d (%s%s)", actions[i].ref,
+				flowName[actions[i].flow],
+				actions[i].repeated ? ", repeated" : "");
+		AiLogLong (label, actions[i].text);
+	}
 	log_add (log_Debug, "AI: entering text input, %d actions offered",
 			(int)count);
 
-	entered = DoTextEntry (&tes);
-	log_add (log_Debug, "AI: text entry returned %d, input=[%s]",
-			(int)entered, input);
+	/* Drawn before entry, not on the first keystroke. ChangeCallback only
+	 * fires once something changes, so until then the box was invisible and
+	 * there was no sign the game was waiting for anything. */
+	aiReplayRequested = FALSE;
+	aiLastCaretByte = 0;
+	AiShowInput (input, 0);
 
-	if (!entered)
-	{	/* Cancelled. Fall back to the original menu for this turn.
-		 *
-		 * There must always be a way out. The character decides whether
-		 * to agree to things, but he does not get to decide whether the
-		 * player may leave, and a player who cannot persuade him must
-		 * not be trapped in the conversation. */
-		PlayerResponseInput (pES);
+	entered = DoTextEntry (&tes);
+
+	if (aiReplayRequested)
+	{	/* Left arrow: replay the last exchange, exactly as the response
+		 * menu does. */
+		log_add (log_Debug, "AI: replaying last exchange");
+		SelectReplay (pES);
 		return;
 	}
+
+	if (!entered)
+	{	/* Cancel opens the conversation summary, which is what it does on
+		 * the menu path. It must NOT drop back to the original response
+		 * menu: that is the authored list this mode exists to replace, and
+		 * seeing it appear reads as the AI having failed.
+		 *
+		 * pES is deliberately not passed, because SelectConversationSummary
+		 * ends by drawing the response menu over the same area. */
+		log_add (log_Debug, "AI: text entry cancelled; showing summary");
+		SelectConversationSummary (NULL);
+		return;
+	}
+
+	AiLogLong ("player said", input);
 
 	/* Empty line: leave the action set standing and ask again. */
 	if (input[0] == '\0')
 		return;
 
+	AiSetPlayerPhrase (pES, input);
 	aiWaitTicks = 0;
 	AiConv_SetWaitCallback (AiOnWait);
 
@@ -1611,8 +1862,8 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 		return;
 	}
 
-	log_add (log_Debug, "AI: reply action=%d text=[%.60s]", reply.action,
-			reply.spokenText);
+	log_add (log_Debug, "AI: reply action=%d", reply.action);
+	AiLogLong ("reply text", reply.spokenText);
 
 	if (reply.hasAction)
 	{
@@ -1620,15 +1871,7 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 		{
 			if ((int)pES->response_list[i].response_ref == reply.action)
 			{
-				/* Dispatch normally so the deterministic transition is the
-				 * game's own, with the canonical phrases muted because the
-				 * generated line replaces them. SelectResponse clears the
-				 * subtitles, so the generated text is spliced afterwards. */
-				pES->cur_response = (BYTE)i;
-				AiConv_SuppressPhrases (TRUE);
-				SelectResponse (pES);
-				AiConv_SuppressPhrases (FALSE);
-				AiSpeakGenerated (reply.spokenText);
+				AiSpeakDispatched (pES, (BYTE)i, input, reply.spokenText);
 				return;
 			}
 		}
@@ -1641,7 +1884,7 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 	 * pending and re-enters text entry immediately, which wipes the line
 	 * before it is ever drawn. SelectResponse does the same thing on the
 	 * menu path. */
-	FeedbackPlayerPhrase (input);
+	FeedbackPlayerPhrase (pES->phrase_buf);
 	AiSpeakGenerated (reply.spokenText);
 }
 
@@ -2145,7 +2388,14 @@ InitCommunication (CONVERSATION which_comm)
 	if (disableInteractivity)
 		return 0;
 #endif
-	
+
+	/* Per-conversation AI state. Neither of these was ever being cleared,
+	 * so a second encounter began with the first one's history and the
+	 * spoken list quietly filled to its cap and stopped recording. */
+	AiConv_ForgetSpoken ();
+	AiConv_ForgetDispatched ();
+	aiCurrentNode = NULL;
+
 
 	if (LastActivity & CHECK_LOAD)
 	{

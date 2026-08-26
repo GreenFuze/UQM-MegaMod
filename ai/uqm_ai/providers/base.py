@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..protocol import ConverseRequest, ConverseResponse
+from ..protocol import ConverseRequest, ConverseResponse, NarrateRequest
 
 
 class ProviderError(Exception):
@@ -31,6 +31,18 @@ class LLMProvider(ABC):
     @abstractmethod
     def generate(self, request: ConverseRequest, system_prompt: str) -> ConverseResponse:
         """Produce a reply. Must not raise anything but ProviderError."""
+
+    @abstractmethod
+    def narrate(self, request: NarrateRequest, system_prompt: str) -> str:
+        """Say the encounter's authored answer in the character's voice.
+
+        The outcome is already decided and already applied. An implementation
+        may only reword it: reversing, softening or embellishing it into a
+        different outcome is the one thing this must never do.
+
+        Must not raise anything but ProviderError. The game falls back to
+        speaking the authored text verbatim, which is always correct.
+        """
 
 
 class TTSProvider(ABC):

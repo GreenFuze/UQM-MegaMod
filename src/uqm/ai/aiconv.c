@@ -36,6 +36,15 @@ static AiProc_WaitFn aiWaitFn = NULL;
 static int aiSpoken[AI_MAX_SPOKEN];
 static int aiSpokenCount = 0;
 
+/* Actions the player has dispatched this conversation. */
+#define AI_MAX_DISPATCHED 64
+static int aiDispatched[AI_MAX_DISPATCHED];
+static int aiDispatchedCount = 0;
+
+/* The authored answer produced by the last dispatch. */
+static char aiCaptured[AI_MAX_AUTHORED];
+static size_t aiCapturedLen = 0;
+
 /* Kept so a failure can be shown in the conversation rather than only logged;
  * an unexplained silence reads as the game hanging. */
 static char aiLastError[256] = "";
@@ -76,6 +85,40 @@ AiConv_ForgetSpoken (void)
 }
 
 void
+AiConv_NoteDispatched (int responseRef)
+{
+	int i;
+
+	if (responseRef <= 0 || aiDispatchedCount >= AI_MAX_DISPATCHED)
+		return;
+	for (i = 0; i < aiDispatchedCount; ++i)
+	{
+		if (aiDispatched[i] == responseRef)
+			return;
+	}
+	aiDispatched[aiDispatchedCount++] = responseRef;
+}
+
+BOOLEAN
+AiConv_WasDispatched (int responseRef)
+{
+	int i;
+
+	for (i = 0; i < aiDispatchedCount; ++i)
+	{
+		if (aiDispatched[i] == responseRef)
+			return TRUE;
+	}
+	return FALSE;
+}
+
+void
+AiConv_ForgetDispatched (void)
+{
+	aiDispatchedCount = 0;
+}
+
+void
 AiConv_SetWaitCallback (void (*fn) (void))
 {
 	aiWaitFn = (AiProc_WaitFn)fn;
@@ -91,6 +134,42 @@ BOOLEAN
 AiConv_PhrasesSuppressed (void)
 {
 	return aiSuppressPhrases;
+}
+
+void
+AiConv_ClearCaptured (void)
+{
+	aiCaptured[0] = '\0';
+	aiCapturedLen = 0;
+}
+
+void
+AiConv_CaptureText (const char *text)
+{
+	size_t len;
+
+	if (text == NULL || text[0] == '\0')
+		return;
+
+	/* Separate consecutive phrases, which are separate beats of one answer. */
+	if (aiCapturedLen > 0 && aiCapturedLen + 2 < sizeof (aiCaptured))
+	{
+		aiCaptured[aiCapturedLen++] = '\n';
+		aiCaptured[aiCapturedLen] = '\0';
+	}
+
+	len = strlen (text);
+	if (aiCapturedLen + len >= sizeof (aiCaptured))
+		len = sizeof (aiCaptured) - aiCapturedLen - 1;
+	memcpy (aiCaptured + aiCapturedLen, text, len);
+	aiCapturedLen += len;
+	aiCaptured[aiCapturedLen] = '\0';
+}
+
+const char *
+AiConv_CapturedText (void)
+{
+	return aiCaptured;
 }
 
 /* ---- messaging -------------------------------------------------------- */
@@ -191,6 +270,101 @@ AiConv_IsActive (void)
 	return aiActive;
 }
 
+/* Sends one request and parses the reply, which must be of the expected type.
+ *
+ * buf carries the request in and the reply out; the two never overlap in
+ * time, and one buffer of this size is already the largest thing on the
+ * stack here. */
+static BOOLEAN
+exchange (char *buf, size_t cap, const char *expectedType, AiJsonObject *obj)
+{
+	const char *type;
+
+	if (!sendLine (buf)
+			|| !AiProc_ReadLine (buf, cap, AI_REPLY_TIMEOUT_MS, aiWaitFn))
+	{
+		log_add (log_Warning, "AI: sidecar stopped responding");
+		setLastError ("The AI service stopped responding.");
+		aiActive = FALSE;
+		return FALSE;
+	}
+
+	if (!AiJson_Parse (buf, obj))
+	{
+		log_add (log_Warning, "AI: malformed reply");
+		return FALSE;
+	}
+
+	type = AiJson_GetString (obj, "type");
+	if (type == NULL || strcmp (type, expectedType) != 0)
+	{
+		const char *message = AiJson_GetString (obj, "message");
+
+		log_add (log_Warning, "AI: %s",
+				message != NULL ? message : "unexpected reply");
+		setLastError (message != NULL ? message : "The AI service failed.");
+		return FALSE;
+	}
+	return TRUE;
+}
+
+/* Opens a request and writes the fields every request type carries.
+ *
+ * Session identity is carried from the first protocol version, before memory
+ * exists, because retrofitting it later is far more expensive. */
+static void
+beginRequest (AiJsonWriter *w, char *buf, size_t cap, const char *type,
+		int requestId, const char *playerInput)
+{
+	AiJson_InitWriter (w, buf, cap);
+	AiJson_BeginObject (w);
+	AiJson_WriteString (w, "type", type);
+	AiJson_WriteInt (w, "id", requestId);
+
+	AiJson_WriteString (w, "session_save_id", "slot0");
+	AiJson_WriteString (w, "session_character", "fwiffo");
+	AiJson_WriteString (w, "session_encounter", "SPATHI_PLUTO");
+
+	AiJson_WriteString (w, "player_input", playerInput);
+}
+
+static void
+writeActions (AiJsonWriter *w, const AI_ACTION *actions, int numActions)
+{
+	int i;
+
+	AiJson_BeginArray (w, "actions");
+	for (i = 0; i < numActions; ++i)
+	{
+		AiJson_WriteRawElement (w);
+		AiJson_BeginObject (w);
+		AiJson_WriteInt (w, "ref", actions[i].ref);
+		AiJson_WriteString (w, "text", actions[i].text);
+		AiJson_WriteBool (w, "terminal", actions[i].terminal);
+		AiJson_WriteInt (w, "flow", actions[i].flow);
+		AiJson_WriteBool (w, "repeated", actions[i].repeated);
+		AiJson_EndObject (w);
+	}
+	AiJson_EndArray (w);
+}
+
+/* What he has already said this conversation, which is what he is allowed to
+ * draw on: he may repeat and elaborate, never volunteer canon he has not
+ * reached. */
+static void
+writeSpokenRefs (AiJsonWriter *w)
+{
+	int i;
+
+	AiJson_BeginArray (w, "spoken_refs");
+	for (i = 0; i < aiSpokenCount; ++i)
+	{
+		AiJson_WriteRawElement (w);
+		AiJson_WriteInt (w, NULL, aiSpoken[i]);
+	}
+	AiJson_EndArray (w);
+}
+
 /* Builds the request separately, so a serialisation overflow is caught
  * before anything reaches the pipe. */
 static BOOLEAN
@@ -200,45 +374,65 @@ buildRequest (char *buf, size_t cap, int requestId, const char *playerInput,
 	AiJsonWriter w;
 	int i;
 
-	AiJson_InitWriter (&w, buf, cap);
-	AiJson_BeginObject (&w);
-	AiJson_WriteString (&w, "type", "converse");
-	AiJson_WriteInt (&w, "id", requestId);
-
-	/* Session identity is carried from the first protocol version, before
-	 * memory exists, because retrofitting it later is far more expensive. */
-	AiJson_WriteString (&w, "session_save_id", "slot0");
-	AiJson_WriteString (&w, "session_character", "fwiffo");
-	AiJson_WriteString (&w, "session_encounter", "SPATHI_PLUTO");
-
-	AiJson_WriteString (&w, "player_input", playerInput);
-
-	AiJson_BeginArray (&w, "actions");
-	for (i = 0; i < numActions; ++i)
-	{
-		AiJson_WriteRawElement (&w);
-		AiJson_BeginObject (&w);
-		AiJson_WriteInt (&w, "ref", actions[i].ref);
-		AiJson_WriteString (&w, "text", actions[i].text);
-		AiJson_WriteBool (&w, "terminal", actions[i].terminal);
-		AiJson_EndObject (&w);
-	}
-	AiJson_EndArray (&w);
-
-	/* What he has already said this conversation, which is what he is
-	 * allowed to draw on. */
-	AiJson_BeginArray (&w, "spoken_refs");
-	for (i = 0; i < aiSpokenCount; ++i)
-	{
-		AiJson_WriteRawElement (&w);
-		AiJson_WriteInt (&w, NULL, aiSpoken[i]);
-	}
-	AiJson_EndArray (&w);
+	beginRequest (&w, buf, cap, "converse", requestId, playerInput);
+	writeActions (&w, actions, numActions);
+	writeSpokenRefs (&w);
 
 	AiJson_WriteInt (&w, "visits", visits);
 	AiJson_EndObject (&w);
 
 	return AiJson_WriterOk (&w);
+}
+
+static BOOLEAN
+buildNarrateRequest (char *buf, size_t cap, int requestId,
+		const char *playerInput, const char *authoredText)
+{
+	AiJsonWriter w;
+
+	beginRequest (&w, buf, cap, "narrate", requestId, playerInput);
+	AiJson_WriteString (&w, "authored_text", authoredText);
+	writeSpokenRefs (&w);
+	AiJson_EndObject (&w);
+
+	return AiJson_WriterOk (&w);
+}
+
+BOOLEAN
+AiConv_Narrate (const char *playerInput, const char *authoredText,
+		AI_REPLY *reply)
+{
+	char line[AI_LINE_MAX];
+	AiJsonObject obj;
+	const char *spoken;
+
+	if (!aiActive || authoredText == NULL || authoredText[0] == '\0')
+		return FALSE;
+
+	setLastError (NULL);
+
+	if (!buildNarrateRequest (line, sizeof line, aiNextRequestId++,
+			playerInput, authoredText))
+	{
+		log_add (log_Warning, "AI: narrate request too large to serialise");
+		return FALSE;
+	}
+
+	if (!exchange (line, sizeof line, "narrate", &obj))
+		return FALSE;
+
+	spoken = AiJson_GetString (&obj, "spoken_text");
+	if (spoken == NULL || spoken[0] == '\0')
+	{
+		log_add (log_Warning, "AI: narrate reply had no text");
+		return FALSE;
+	}
+
+	/* No action is read here, and none is accepted: the action has already
+	 * been dispatched and its outcome is what this call is describing. */
+	memset (reply, 0, sizeof (*reply));
+	strncpy (reply->spokenText, spoken, AI_MAX_TEXT - 1);
+	return TRUE;
 }
 
 BOOLEAN
@@ -247,7 +441,6 @@ AiConv_Converse (const char *playerInput, const AI_ACTION *actions,
 {
 	char line[AI_LINE_MAX];
 	AiJsonObject obj;
-	const char *type;
 	const char *spoken;
 	int action = 0;
 	int i;
@@ -264,31 +457,8 @@ AiConv_Converse (const char *playerInput, const AI_ACTION *actions,
 		return FALSE;
 	}
 
-	if (!sendLine (line)
-			|| !AiProc_ReadLine (line, sizeof line, AI_REPLY_TIMEOUT_MS, aiWaitFn))
-	{
-		log_add (log_Warning, "AI: sidecar stopped responding");
-		setLastError ("The AI service stopped responding.");
-		aiActive = FALSE;
+	if (!exchange (line, sizeof line, "converse", &obj))
 		return FALSE;
-	}
-
-	if (!AiJson_Parse (line, &obj))
-	{
-		log_add (log_Warning, "AI: malformed reply");
-		return FALSE;
-	}
-
-	type = AiJson_GetString (&obj, "type");
-	if (type == NULL || strcmp (type, "converse") != 0)
-	{
-		const char *message = AiJson_GetString (&obj, "message");
-
-		log_add (log_Warning, "AI: %s",
-				message != NULL ? message : "unexpected reply");
-		setLastError (message != NULL ? message : "The AI service failed.");
-		return FALSE;
-	}
 
 	spoken = AiJson_GetString (&obj, "spoken_text");
 	if (spoken == NULL || spoken[0] == '\0')

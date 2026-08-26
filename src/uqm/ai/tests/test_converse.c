@@ -30,7 +30,18 @@ main (void)
 		"\"session_character\":\"fwiffo\",\"session_encounter\":\"SPATHI_PLUTO\","
 		"\"player_input\":\"Identify yourself\",\"actions\":["
 		"{\"ref\":2,\"text\":\"Attention alien vessel: Identify yourself!\","
-		"\"terminal\":false}],\"spoken_refs\":[1],\"visits\":0}\n";
+		"\"terminal\":false,\"flow\":1}],\"spoken_refs\":[1],\"visits\":0}\n";
+	/* The second half of a turn that took an action: the encounter has
+	 * already run and produced this answer, and all that is wanted back is
+	 * the same meaning in his voice. A reply agreeing to leave Pluto would
+	 * be the exact defect this path exists to prevent. */
+	const char *narrate =
+		"{\"type\":\"narrate\",\"id\":2,\"session_save_id\":\"slot0\","
+		"\"session_character\":\"fwiffo\",\"session_encounter\":\"SPATHI_PLUTO\","
+		"\"player_input\":\"Join us. We will keep you safe.\","
+		"\"authored_text\":\"Leave Pluto? Out there is where the monsters are! "
+		"No. I am staying right here in my nice safe base.\","
+		"\"spoken_refs\":[1]}\n";
 
 	err[0] = '\0';
 	if (!AiProc_Spawn ("ai", err, sizeof err))
@@ -65,6 +76,23 @@ main (void)
 	}
 
 	printf ("reply: %.400s\n", line);
+
+	printf ("sending a narrate turn (this invokes the model)...\n");
+	if (!AiProc_Write (narrate, strlen (narrate)))
+	{
+		printf ("WRITE FAILED\n");
+		AiProc_Kill ();
+		return 1;
+	}
+
+	if (!AiProc_ReadLine (line, sizeof line, 120000, onWait))
+	{
+		printf ("NO NARRATE REPLY\n");
+		AiProc_Kill ();
+		return 1;
+	}
+
+	printf ("narrated: %.600s\n", line);
 	AiProc_Kill ();
 	return 0;
 }

@@ -194,17 +194,29 @@ NPCPhrase_cb (int index, CallbackFunction cb)
 	 * it is what the character is subsequently allowed to talk about. */
 	AiConv_NoteSpoken (index);
 
-	/* In AI mode the generated line has already been spliced in; the
-	 * canonical text would otherwise be spoken immediately after it. */
-	if (AiConv_PhrasesSuppressed ())
-		return;
-
 	pStr = (UNICODE *)GetStringAddress (
 			SetAbsStringTableIndex (CommData.ConversationPhrases, index - 1));
 	pClip = GetStringSoundClip (
 			SetAbsStringTableIndex (CommData.ConversationPhrases, index - 1));
 	pTimeStamp = GetStringTimeStamp (
 			SetAbsStringTableIndex (CommData.ConversationPhrases, index - 1));
+
+	/* In AI mode this line is not delivered as written - but it IS the
+	 * encounter's answer, and the encounter decides outcomes. So it is
+	 * handed to the AI to reword rather than thrown away; discarding it let
+	 * a generated line claim an outcome the handler had just refused. */
+	if (AiConv_PhrasesSuppressed ())
+	{
+		if (!StarSeed && luaUqm_comm_stringNeedsInterpolate (pStr))
+		{
+			pStr = luaUqm_comm_stringInterpolate (pStr);
+			AiConv_CaptureText (pStr);
+			HFree (pStr);
+		}
+		else
+			AiConv_CaptureText (pStr);
+		return;
+	}
 
 	if (!StarSeed)
 	{
