@@ -140,8 +140,15 @@ class ClaudeProvider(LLMProvider):
         lines.append("")
         lines.append(
             "Decide two things: which of those lines this exchange corresponds "
-            "to in meaning, and whether you are going along with it. Refusing "
-            "is a real choice - say so in character."
+            "to in meaning, and whether you are going along with it."
+        )
+        lines.append(
+            "Willingness applies ONLY to things being asked OF you, such as an "
+            "invitation to come aboard. When the captain is stating their own "
+            "decision - that they are leaving, or that they are attacking you "
+            "- it is not yours to refuse: set willing to true and react in "
+            "character, however you feel about it. You cannot keep someone "
+            "talking to you by declining to let them go."
         )
         lines.append(
             "Say only what you actually know. Do not invent Spathi history, "

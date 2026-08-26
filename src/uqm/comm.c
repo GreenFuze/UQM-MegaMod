@@ -1580,8 +1580,19 @@ AiPlayerResponseInput (ENCOUNTER_STATE *pES)
 	log_add (log_Debug, "AI: text entry returned %d, input=[%s]",
 			(int)entered, input);
 
-	/* Cancelled or empty: leave the action set standing and ask again. */
-	if (!entered || input[0] == '\0')
+	if (!entered)
+	{	/* Cancelled. Fall back to the original menu for this turn.
+		 *
+		 * There must always be a way out. The character decides whether
+		 * to agree to things, but he does not get to decide whether the
+		 * player may leave, and a player who cannot persuade him must
+		 * not be trapped in the conversation. */
+		PlayerResponseInput (pES);
+		return;
+	}
+
+	/* Empty line: leave the action set standing and ask again. */
+	if (input[0] == '\0')
 		return;
 
 	aiWaitTicks = 0;
