@@ -34,6 +34,7 @@ Reply with ONLY a JSON object, no prose around it, no code fence:
 
 {"matches_ref": <the ref this exchange corresponds to, or null>,
  "willing": <true if you are going along with it, false if you refuse>,
+ "promises_action": <true if your spoken_text agrees to DO something asked of you>,
  "spoken_text": "<what you say, first person, in character>",
  "remember": "<one short line worth recalling next time, or null>"}
 
@@ -68,7 +69,32 @@ class ClaudeProvider(LLMProvider):
         except Exception as exc:  # noqa: BLE001 - surfaced to the game as an error
             raise ProviderError(self._describe(exc, self._last_result)) from exc
 
-        return self._parse(raw, request)
+        response, promises = self._parse(raw, request)
+
+        # A reply that agrees to do something while selecting nothing for the
+        # game to act on is the one failure a player reads as broken: the
+        # character says "I will join you" and nothing happens. Instructions
+        # alone did not prevent it, so the contradiction is detected here and
+        # the model gets one chance to resolve it.
+        if promises and response.action is None:
+            retry = (
+                user_prompt
+                + (chr(10) * 2) + "Your previous reply agreed to do something but "
+                "selected no ref, so NOTHING WOULD HAPPEN: the captain would "
+                "see you promise and then not act. Either set matches_ref to "
+                "the line that makes it real, with willing true, or do not "
+                "agree at all - say in character what is missing, or why you "
+                "decline."
+            )
+            try:
+                raw = anyio.run(self._complete, system_prompt, retry)
+                retried, still_promises = self._parse(raw, request)
+                if retried.action is not None or not still_promises:
+                    return retried
+            except Exception:  # noqa: BLE001 - keep the first reply on failure
+                pass
+
+        return response
 
 
     @staticmethod
@@ -206,7 +232,7 @@ class ClaudeProvider(LLMProvider):
             # transition happens, which is the safe direction.
             return ConverseResponse(
                 id=request.id, spoken_text=text, action=None, remember=None
-            )
+            ), False
 
         # The action is DERIVED, not taken from the model. Asking it to fill an
         # action field meant it would agree warmly in prose and leave the field
@@ -229,9 +255,11 @@ class ClaudeProvider(LLMProvider):
         if not isinstance(remember, str) or not remember.strip():
             remember = None
 
+        promises = bool(payload.get("promises_action", False))
+
         return ConverseResponse(
             id=request.id,
             spoken_text=str(payload.get("spoken_text", "")).strip(),
             action=action,
             remember=remember,
-        )
+        ), promises
