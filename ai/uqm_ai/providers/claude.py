@@ -54,6 +54,7 @@ class ClaudeProvider(LLMProvider):
             )
         self._model = model
         self._timeout_s = timeout_s
+        self._last_result = ""
 
     @property
     def name(self) -> str:
@@ -65,27 +66,32 @@ class ClaudeProvider(LLMProvider):
         try:
             raw = anyio.run(self._complete, system_prompt, user_prompt)
         except Exception as exc:  # noqa: BLE001 - surfaced to the game as an error
-            raise ProviderError(self._describe(exc)) from exc
+            raise ProviderError(self._describe(exc, self._last_result)) from exc
 
         return self._parse(raw, request)
 
 
     @staticmethod
-    def _describe(exc: Exception) -> str:
+    def _describe(exc: Exception, last_result: str = "") -> str:
         """Turn an SDK failure into something a player can act on.
 
-        The SDK reports an expired login as "returned an error result:
-        success", which is worse than useless. An authentication failure is by
-        far the most likely cause of a sudden total outage, so name it and say
-        what to do about it.
+        The SDK wraps a failed run as "returned an error result: success",
+        which says nothing at all. The CLI's own text is far more useful and
+        is usually sitting in the last result message, so prefer it.
         """
-        text = str(exc)
-        if "error result: success" in text or "authenticate" in text.lower():
+        detail = (last_result or "").strip()
+        lowered = detail.lower()
+
+        if "authenticate" in lowered or "login" in lowered or "expired" in lowered:
             return (
-                "the Claude CLI could not authenticate - your login has most "
-                "likely expired. Run 'claude' in a terminal and sign in again."
+                f"the Claude CLI is not signed in ({detail}). Run 'claude' in a "
+                "terminal, type /login, and complete sign-in in the browser. "
+                "Starting the CLI alone does not re-authenticate an expired "
+                "session."
             )
-        return f"claude call failed: {text}"
+        if detail:
+            return f"the Claude CLI failed: {detail}"
+        return f"claude call failed: {exc}"
 
     async def _complete(self, system_prompt: str, user_prompt: str) -> str:
         options = ClaudeAgentOptions(
@@ -104,6 +110,10 @@ class ClaudeProvider(LLMProvider):
                 value = getattr(message, "result", None)
                 if isinstance(value, str):
                     result = value
+                    # The CLI reports failures such as an expired login in the
+                    # result text and only then exits non-zero, so keep it: the
+                    # exception that follows carries none of this detail.
+                    self._last_result = value
         return result
 
     @staticmethod

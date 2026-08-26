@@ -110,8 +110,12 @@ class Preflight:
         try:
             reply = anyio.run(ask)
         except Exception as exc:  # noqa: BLE001
-            return [Problem(f"the Claude CLI rejected a test request: {exc}",
-                            self._live_fix())]
+            # Prefer the CLI's own words, which the provider captured, over
+            # the SDK's opaque wrapper text.
+            return [Problem(
+                provider._describe(exc, provider._last_result),  # noqa: SLF001
+                self._live_fix(),
+            )]
 
         if not reply.strip():
             return [Problem("the Claude CLI returned an empty response",
@@ -121,10 +125,12 @@ class Preflight:
     @staticmethod
     def _live_fix() -> str:
         return (
-            "run 'claude' in a terminal from " + str(Path.cwd()) + " and: "
-            "(1) sign in if prompted, and (2) answer YES to 'do you trust the "
-            "files in this folder'. The CLI cannot answer either prompt when "
-            "the game launches it."
+            "if it says you are not signed in: run 'claude' in a terminal, "
+            "type /login, and finish sign-in in the browser - simply starting "
+            "the CLI does not renew an expired session. If it asks about "
+            "trusting a folder, answer yes for "
+            + str(Path.cwd())
+            + ". The CLI can be asked neither of these when the game starts it."
         )
 
 
