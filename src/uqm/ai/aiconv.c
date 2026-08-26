@@ -20,7 +20,9 @@
  * back to the menu. */
 #define AI_REPLY_TIMEOUT_MS  90000
 
-#define AI_LINE_MAX          8192
+/* Must hold the whole request: a long player message plus every action
+ * the encounter exported, all JSON-escaped. */
+#define AI_LINE_MAX          32768
 
 /* Where the sidecar lives, relative to the game's working directory. */
 #define AI_WORKING_DIR       "ai"

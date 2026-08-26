@@ -20,7 +20,9 @@
 
 #define AI_MAX_ACTIONS    24
 #define AI_MAX_TEXT       2048
-#define AI_MAX_INPUT      512
+/* Players write paragraphs, not commands. A cap that stops them
+ * mid-argument is worse than a longer request. */
+#define AI_MAX_INPUT      2048
 
 /* One action the encounter has exported this turn. */
 typedef struct

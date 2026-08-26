@@ -20,7 +20,9 @@ PROTOCOL_VERSION = 1
 # unbounded prompt or an unbounded save file.
 MAX_SPOKEN_TEXT = 2000
 MAX_REMEMBER = 400
-MAX_PLAYER_INPUT = 1000
+# Long enough for a real argument. Note this REJECTS rather than
+# truncates, so it must comfortably exceed what the game can send.
+MAX_PLAYER_INPUT = 4000
 
 
 class ProtocolError(Exception):

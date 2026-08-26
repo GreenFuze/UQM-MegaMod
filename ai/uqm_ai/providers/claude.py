@@ -143,12 +143,36 @@ class ClaudeProvider(LLMProvider):
             "to in meaning, and whether you are going along with it."
         )
         lines.append(
-            "Willingness applies ONLY to things being asked OF you, such as an "
-            "invitation to come aboard. When the captain is stating their own "
-            "decision - that they are leaving, or that they are attacking you "
-            "- it is not yours to refuse: set willing to true and react in "
-            "character, however you feel about it. You cannot keep someone "
-            "talking to you by declining to let them go."
+            "When no listed line matches what the captain SAID, match on TONE "
+            "instead: friendly, demanding, apologetic, threatening, curious. "
+            "Early in a conversation the listed lines are simply ways of "
+            "opening it, so the captain's manner is what actually "
+            "distinguishes them, and picking the closest in tone is right "
+            "even when the words differ completely."
+        )
+        lines.append(
+            "IMPORTANT - the conversation only moves forward when you pick a "
+            "ref. If you keep choosing null, the captain is stuck repeating "
+            "themselves and nothing further ever becomes possible. For the "
+            "ordinary back-and-forth lines (those not marked as ending the "
+            "conversation), lean towards picking the closest reasonable "
+            "match so things progress. Precision matters far more for the "
+            "lines that end the conversation - only pick one of those if the "
+            "captain clearly means it."
+        )
+        lines.append(
+            "If the captain asks for something that is NOT on the list - to "
+            "join them when no invitation is listed, for instance - you must "
+            "NOT simply agree, because nothing would happen and the moment "
+            "would be lost. Say, in character, what is missing: that you do "
+            "not even know who they are yet, or that they have not actually "
+            "asked you properly. Steer them towards what IS possible."
+        )
+        lines.append(
+            "Willingness applies ONLY to things being asked OF you, such as "
+            "an invitation to come aboard. When the captain states their own "
+            "decision - that they are leaving, or attacking - it is not yours "
+            "to refuse: set willing to true and react in character."
         )
         lines.append(
             "Say only what you actually know. Do not invent Spathi history, "
