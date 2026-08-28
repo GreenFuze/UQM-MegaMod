@@ -15,7 +15,7 @@ main (void)
 	char line[8192];
 
 	err[0] = '\0';
-	if (!AiProc_Spawn ("ai", err, sizeof err))
+	if (!AiProc_Spawn ("ai", "none", err, sizeof err))
 	{
 		printf ("SPAWN FAILED: %s\n", err);
 		return 1;

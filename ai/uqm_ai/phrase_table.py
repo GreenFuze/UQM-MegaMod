@@ -27,6 +27,16 @@ class StringsHeader:
     _ENUM_BODY = re.compile(r"enum\s*\{(?P<body>.*?)\}\s*;", re.DOTALL)
     _MEMBER = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*,?\s*$")
 
+    # Members inside a #if 0 block are not compiled, so the game's enum does
+    # not contain them and every later phrase sits three indices lower than a
+    # naive read suggests. pkunk/strings.h does exactly this for
+    # NOT_CONQUER_10..12, and counting them misattributes every line after
+    # that point - which is the failure this class exists to prevent.
+    _IF_ZERO = re.compile(r"^\s*#\s*if\s+0\s*$")
+    _IF_ANY = re.compile(r"^\s*#\s*if")
+    _ENDIF = re.compile(r"^\s*#\s*endif\b")
+    _DIRECTIVE = re.compile(r"^\s*#")
+
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
         if not self._path.is_file():
@@ -45,9 +55,34 @@ class StringsHeader:
             raise PhraseTableError(f"no enum found in {self._path}")
 
         names: list[str] = []
+        skip_depth = 0
+
         for line in match.group("body").splitlines():
             # Drop comments before matching so annotated members still parse.
             line = re.sub(r"/\*.*?\*/", "", line)
+
+            # Inside a disabled block, track nesting and look only for its end.
+            if skip_depth:
+                if self._IF_ANY.match(line):
+                    skip_depth += 1
+                elif self._ENDIF.match(line):
+                    skip_depth -= 1
+                continue
+
+            if self._IF_ZERO.match(line):
+                skip_depth = 1
+                continue
+            if self._ENDIF.match(line):
+                continue
+            if self._DIRECTIVE.match(line):
+                # Any other conditional means we cannot know what the compiler
+                # emitted, and guessing shifts every later index. Refuse rather
+                # than produce a table that is quietly wrong.
+                raise PhraseTableError(
+                    f"{self._path}: unsupported preprocessor directive inside "
+                    f"enum: {line.strip()!r}"
+                )
+
             member = self._MEMBER.match(line)
             if member:
                 names.append(member.group(1))
@@ -65,7 +100,9 @@ class TableEntry:
     key: str
     kind: PhraseKind
     voice_clip: str | None
-    text: str
+    # None when the enum declares a phrase the dialogue file does not carry.
+    # The ref still resolves to a name, but there are no words to quote.
+    text: str | None
     has_interpolation: bool
 
 
@@ -78,8 +115,9 @@ class PhraseTable:
     to the wrong action.
     """
 
-    def __init__(self, header: StringsHeader, dialogue: DialogueFile) -> None:
-        self._entries = self._join(header, dialogue)
+    def __init__(self, header: StringsHeader, dialogue: DialogueFile,
+            aliases: dict[int, str] | None = None) -> None:
+        self._entries = self._join(header, dialogue, dict(aliases or {}))
 
     @property
     def entries(self) -> tuple[TableEntry, ...]:
@@ -92,21 +130,52 @@ class PhraseTable:
         raise KeyError(f"no phrase {key!r} in table")
 
     @staticmethod
-    def _join(header: StringsHeader, dialogue: DialogueFile) -> tuple[TableEntry, ...]:
+    def _join(header: StringsHeader, dialogue: DialogueFile,
+            aliases: dict[int, str]) -> tuple[TableEntry, ...]:
         # Enum index 0 is NULL_PHRASE and has no dialogue entry; real phrases
         # start at enum value 1 == dialogue entry 0.
         enum_names = header.names[1:]
         phrases: tuple[Phrase, ...] = dialogue.phrases
 
-        if len(enum_names) != len(phrases):
+        # A dialogue file LONGER than the enum means an entry was inserted, and
+        # an insertion shifts every index after it. Still fatal.
+        if len(phrases) > len(enum_names):
             raise PhraseTableError(
-                f"enum has {len(enum_names)} phrases but {dialogue.path.name} "
-                f"has {len(phrases)}"
+                f"{dialogue.path.name} has {len(phrases)} phrases but the enum "
+                f"has {len(enum_names)} - the dialogue file is longer than the "
+                f"enum, so an entry was inserted and the tables are misaligned"
             )
 
         entries: list[TableEntry] = []
-        for offset, (name, phrase) in enumerate(zip(enum_names, phrases)):
-            if name != phrase.key:
+        for offset, name in enumerate(enum_names):
+            if offset >= len(phrases):
+                # A trailing enum member the dialogue file does not carry. umgah
+                # declares OUT_TAKES and umgahc.c:511 speaks it, yet umgah.txt
+                # has no entry - the stock game reads off the end of its own
+                # table. A missing tail cannot shift an earlier index, so carry
+                # the name with no text rather than failing the whole race.
+                entries.append(
+                    TableEntry(
+                        enum_value=offset + 1,
+                        key=name,
+                        kind=(PhraseKind.NPC if name.isupper()
+                                else PhraseKind.PLAYER),
+                        voice_clip=None,
+                        text=None,
+                        has_interpolation=False,
+                    )
+                )
+                continue
+
+            phrase = phrases[offset]
+
+            # Position is what the game dispatches on - commglue.h resolves a
+            # phrase as SetAbsStringTableIndex (..., R - 1) - and the name is a
+            # consistency check on top. An explicit per-index alias covers a
+            # known rename (MegaMod's artifact randomisation renames starbase
+            # indices 151 and 152) while a genuine shift still fails, because a
+            # shift mismatches in a long run nobody would alias by hand.
+            if name != phrase.key and aliases.get(offset) != phrase.key:
                 raise PhraseTableError(
                     f"index {offset}: enum says {name!r} but dialogue says "
                     f"{phrase.key!r} - the tables are misaligned"

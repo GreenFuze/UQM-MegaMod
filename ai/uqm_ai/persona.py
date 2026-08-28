@@ -92,10 +92,13 @@ class PromptBuilder:
     def __init__(self, profile: CharacterProfile, table: PhraseTable) -> None:
         self._profile = profile
         self._table = table
+        # Entries with no text exist where the enum declares a phrase the
+        # dialogue file does not carry (umgah's OUT_TAKES). They resolve as
+        # refs but there are no words to quote, so they never reach a prompt.
         self._npc_by_key = {
             entry.key: entry
             for entry in table.entries
-            if entry.kind is PhraseKind.NPC
+            if entry.kind is PhraseKind.NPC and entry.text
         }
         self._key_by_ref = {entry.enum_value: entry.key for entry in table.entries}
 

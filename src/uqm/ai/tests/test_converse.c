@@ -44,7 +44,7 @@ main (void)
 		"\"spoken_refs\":[1]}\n";
 
 	err[0] = '\0';
-	if (!AiProc_Spawn ("ai", err, sizeof err))
+	if (!AiProc_Spawn ("ai", "none", err, sizeof err))
 	{
 		printf ("SPAWN FAILED: %s\n", err);
 		return 1;
