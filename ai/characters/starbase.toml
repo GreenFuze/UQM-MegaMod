@@ -104,6 +104,144 @@ when = ["CHMMR_BOMB_STATE >= 2", "TALKING_PET_ON_SHIP"]
 phrases = ["GO_DESTROY_SAMATRA"]
 fact = "Everything needed for victory is in hand. It is time to attack the Sa-Matra."
 
+# --- what he can be interrogated about ----------------------------------
+#
+# These are not story-gated in the C: they are reachable whenever the player is
+# at the starbase, through menus four levels deep that most players never open.
+# Free text is what makes them worth having, and it is the single biggest gain
+# of the AI edition for this character - he served through the war and can talk
+# about all of it.
+
+[[knowledge]]
+id = "the_war_and_the_surrender"
+when = "always"
+phrases = ["AFTER_WAR", "ABOUT_URQUAN", "ABOUT_ALIENS_ON_EARTH", "ABOUT_PRECURSORS", "ABOUT_OLD_RACES"]
+fact = "You fought in the war, you were there for the surrender, and you can describe both."
+
+[[knowledge]]
+id = "the_alliance_races"
+when = "always"
+phrases = [
+    "ABOUT_CHENJESU", "ABOUT_MMRNMHRM", "ABOUT_YEHAT", "ABOUT_SHOFIXTI",
+    "ABOUT_SYREEN", "ABOUT_ARILOU",
+]
+fact = "You knew the Alliance races personally, as allies in a war you lost."
+
+[[knowledge]]
+id = "the_hierarchy_races"
+when = "always"
+phrases = [
+    "ABOUT_MYCON", "ABOUT_SPATHI", "ABOUT_UMGAH", "ABOUT_ANDROSYNTH",
+    "ABOUT_VUX", "ABOUT_ILWRATH", "ABOUT_ALIENS", "ABOUT_OTHER",
+]
+fact = "You fought the Hierarchy races and remember them as enemies, not as subjects of study."
+
+[[knowledge]]
+id = "running_the_ship"
+when = "always"
+phrases = [
+    "ABOUT_FUEL", "ABOUT_MODULES", "ABOUT_CREW", "ABOUT_SHIPS", "ABOUT_RU",
+    "ABOUT_MINERALS", "ABOUT_LIFE", "FIND_URQUAN", "FIGHT_URQUAN",
+]
+fact = "The starbase services the flagship, and you can explain anything about fuel, crew, modules, minerals and shipyard work."
+
+# --- device analyses: only what has actually been handed over ------------
+#
+# The starbase analyses what the captain brings back, and each report exists
+# only once the thing is aboard. This is the clearest per-object case of the
+# same character knowing different things at different times.
+
+[[knowledge]]
+id = "device_portal_spawner"
+when = "PORTAL_SPAWNER_ON_SHIP"
+phrases = ["ABOUT_PORTAL"]
+
+[[knowledge]]
+id = "device_talking_pet"
+when = "TALKING_PET_ON_SHIP"
+phrases = ["ABOUT_TALKPET"]
+
+[[knowledge]]
+id = "device_utwig_bomb"
+when = "UTWIG_BOMB_ON_SHIP"
+phrases = ["ABOUT_BOMB"]
+
+[[knowledge]]
+id = "device_sun_device"
+when = "SUN_DEVICE_ON_SHIP"
+phrases = ["ABOUT_SUN"]
+
+[[knowledge]]
+id = "device_maidens"
+when = "MAIDENS_ON_SHIP"
+phrases = ["ABOUT_MAIDENS"]
+
+[[knowledge]]
+id = "device_rosy_sphere"
+when = "ROSY_SPHERE_ON_SHIP"
+phrases = ["ABOUT_SPHERE"]
+
+[[knowledge]]
+id = "device_aqua_helix"
+when = "AQUA_HELIX_ON_SHIP"
+phrases = ["ABOUT_HELIX"]
+
+[[knowledge]]
+id = "device_clear_spindle"
+when = "CLEAR_SPINDLE_ON_SHIP"
+phrases = ["ABOUT_SPINDLE"]
+
+[[knowledge]]
+id = "device_umgah_broadcaster"
+when = "UMGAH_BROADCASTERS_ON_SHIP"
+phrases = ["ABOUT_UCASTER"]
+
+[[knowledge]]
+id = "device_burvix_broadcaster"
+when = "BURV_BROADCASTERS_ON_SHIP"
+phrases = ["ABOUT_BCASTER"]
+
+[[knowledge]]
+id = "device_taalo_shield"
+when = "TAALO_PROTECTOR_ON_SHIP"
+phrases = ["ABOUT_SHIELD"]
+
+[[knowledge]]
+id = "device_egg_case"
+when = "EGG_CASE0_ON_SHIP"
+phrases = ["ABOUT_EGGCASE_0"]
+
+[[knowledge]]
+id = "device_syreen_shuttle"
+when = "SYREEN_SHUTTLE_ON_SHIP"
+phrases = ["ABOUT_SHUTTLE"]
+
+# The Ultron arrives broken and is repaired in stages, so what the lab can say
+# about it changes four times. ULTRON_CONDITION: 0 the Supox still have it,
+# 1 completely broken, through 4 fully repaired, 5 returned to the Utwig.
+[[knowledge]]
+id = "device_ultron_broken"
+when = "ULTRON_CONDITION == 1"
+phrases = ["ABOUT_ULTRON_0", "ABOUT_ULTRON_1"]
+
+[[knowledge]]
+id = "device_ultron_partial"
+when = "ULTRON_CONDITION == 2"
+phrases = ["ABOUT_ULTRON_2"]
+supersedes = ["device_ultron_broken"]
+
+[[knowledge]]
+id = "device_ultron_repaired"
+when = "ULTRON_CONDITION >= 3"
+phrases = ["ABOUT_ULTRON_3"]
+supersedes = ["device_ultron_broken", "device_ultron_partial"]
+
+[[knowledge]]
+id = "moonbase_integrated"
+when = "MOONBASE_ON_SHIP"
+phrases = ["STARBASE_IS_READY"]
+fact = "The lunar base technology has been integrated into the starbase."
+
 # --- wider canon, all of it from his own experience ---------------------
 
 [[lore]]

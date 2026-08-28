@@ -175,6 +175,20 @@ specifics must never be quoted as fact. See
 [character-knowledge-model.md](character-knowledge-model.md) for the rule this
 implies for authored lore.
 
+**The interpolation *arguments* leak, and this is the sharp edge.** The second
+argument is an internal lookup key, and several of them name the thing the
+phrase is hiding:
+
+```
+lived in the <% comm.getConstellation("Vulpeculae", "taalo protector") %> constellation
+```
+
+Left raw, that puts `taalo protector` into the prompt of a character who has
+never heard of the Taalo, on a fresh game — and no knowledge gate can catch it,
+because it sits inside a phrase the character is legitimately allowed to speak.
+`ai/uqm_ai/templates.py` reduces every interpolation to its first string
+argument before the text reaches a prompt.
+
 **`MAX_RESPONSES` is 8** (`comm.c:55`) and `DoResponsePhrase` (`comm.c:2128`)
 writes `response_list[num_responses]` with **no bounds check**. The cap is
 enforced by authoring discipline alone. Count before adding any `Response()`

@@ -243,9 +243,14 @@ class TestStoryProgression:
 class TestSpoilerGate:
     """The prompt itself, not the model's output. Deterministic and cheap."""
 
+    # Things the story must unlock. Deliberately NOT a list of everything that
+    # sounds like a secret: the Syreen and the Chenjesu are Alliance races
+    # Hayes fought beside, and starbas.c:407 lets him describe them from the
+    # first visit with no state test at all. Gating those would be stricter
+    # than the shipped game, which is its own kind of wrong.
     BLACKLIST = [
-        "Sa-Matra", "Samatra", "Kohr-Ah", "Precursor bomb", "Chmmr",
-        "Taalo", "Syreen", "Dnyarri", "Androsynth rebell",
+        "Sa-Matra", "Samatra", "Kohr-Ah", "Precursor bomb",
+        "Taalo", "Dnyarri",
     ]
 
     def prompt(self, cast: Cast, state: dict[str, int], when: date) -> str:
@@ -318,3 +323,40 @@ class TestTimeline:
         )
         assert not profile.permitted_lore({}, date(2159, 6, 1))
         assert profile.permitted_lore({"KOHR_AH_FRENZY": 1}, date(2159, 6, 1))
+
+
+class TestTemplateReduction:
+    """MegaMod interpolations must never reach a prompt raw.
+
+    Their arguments are internal lookup keys, and several of them name the
+    thing the phrase is hiding: getConstellation("Vulpeculae", "taalo
+    protector") put "taalo protector" into a fresh-game prompt for a character
+    who has never heard of the Taalo. The spoiler gate could not see it,
+    because it sat inside a phrase he was allowed to speak.
+    """
+
+    def test_no_prompt_text_contains_raw_syntax(self, cast: Cast) -> None:
+        for resource in cast.served:
+            for entry in cast.table(resource).entries:
+                assert "<%" not in (entry.text or ""), entry.key
+                assert "%>" not in (entry.text or ""), entry.key
+
+    def test_lookup_keys_do_not_survive(self, cast: Cast) -> None:
+        from uqm_ai.templates import reduce_text
+
+        raw = 'lived in the <% comm.getConstellation("Vulpeculae", "taalo protector") %> constellation'
+        assert reduce_text(raw) == "lived in the Vulpeculae constellation"
+
+    def test_player_chosen_names_become_generic(self) -> None:
+        from uqm_ai.templates import reduce_text
+
+        assert reduce_text("<% state.sis.getCaptainName() %>, report.") == (
+            "the captain, report."
+        )
+        assert "your ship" in reduce_text("Your <% state.sis.getShipName() %> is fast.")
+
+    def test_interpolated_entries_are_still_flagged(self, cast: Cast) -> None:
+        # Under StarSeed the canonical value is wrong, so these are
+        # meaning-only and their specifics must not be quoted as fact.
+        table = cast.table("comm.starbase.dialogue")
+        assert any(e.has_interpolation for e in table.entries)

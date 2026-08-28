@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .dialogue import DialogueFile, Phrase, PhraseKind
+from .templates import reduce_text
 
 
 class PhraseTableError(Exception):
@@ -186,7 +187,11 @@ class PhraseTable:
                     key=name,
                     kind=phrase.kind,
                     voice_clip=phrase.voice_clip,
-                    text=phrase.text,
+                    # Interpolations are reduced here, once, so nothing
+                    # downstream ever sees raw <% ... %>. Their arguments are
+                    # internal lookup keys and several of them name the very
+                    # thing the phrase is hiding - see templates.py.
+                    text=reduce_text(phrase.text),
                     has_interpolation=phrase.has_interpolation,
                 )
             )
