@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 from typing import IO
 
+from . import gamelog
 from .pagination import paginate
 from .voice import VoiceDirectory
 from .persona import PromptBuilder
@@ -198,8 +199,11 @@ class Sidecar:
         return payload
 
     def _send(self, payload: dict) -> None:
-        self._out.write(encode_line(payload) + "\n")
-        self._out.flush()
+        # Shared with the diagnostic channel: the voice model warms up on its
+        # own thread, and a log line landing inside a reply would corrupt it.
+        with gamelog.writer_lock():
+            self._out.write(encode_line(payload) + "\n")
+            self._out.flush()
 
     def _send_error(self, request_id: int, code: str, message: str) -> None:
         self._warn(f"request {request_id}: {code}: {message}")
@@ -208,5 +212,4 @@ class Sidecar:
         )
 
     def _warn(self, message: str) -> None:
-        self._log.write(f"[uqm-ai] {message}\n")
-        self._log.flush()
+        gamelog.emit(message)

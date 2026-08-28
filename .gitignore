@@ -329,3 +329,6 @@ cmake-build-release
 __pycache__/
 *.py[cod]
 .pytest_cache/
+# Speech synthesis lives in its own environment: a specific torch build plus
+# a model, several gigabytes, installed per machine and never committed.
+ai/.venv/

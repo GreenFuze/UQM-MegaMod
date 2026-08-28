@@ -14,8 +14,47 @@ directory.
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
+
+
+class AudioError(Exception):
+    """Raised when the game's own audio cannot be read."""
+
+
+def decode_to_wav(
+    source: Path,
+    target: Path,
+    sample_rate: int,
+    seconds: float | None = None,
+) -> Path:
+    """Decode one of the game's Ogg clips to mono WAV.
+
+    ffmpeg rather than a Python audio stack: it is already needed to work
+    with this content at all, and the alternative is several more large
+    dependencies to read a handful of short files.
+
+    seconds trims the result, which matters for a voice reference - cloners
+    want a few clean seconds, and Fwiffo's lines run to half a minute.
+    """
+    command = ["ffmpeg", "-loglevel", "error", "-y", "-i", str(source)]
+    if seconds is not None:
+        command += ["-t", f"{seconds:g}"]
+    command += ["-ar", str(sample_rate), "-ac", "1", str(target)]
+
+    try:
+        subprocess.run(command, check=True, capture_output=True)
+    except FileNotFoundError as exc:
+        raise AudioError(
+            "ffmpeg is not on PATH; it is needed to read the game's Ogg clips"
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        raise AudioError(
+            f"ffmpeg could not decode {source}: "
+            f"{exc.stderr.decode('utf-8', 'replace').strip()}"
+        ) from exc
+    return target
 
 
 class VoiceDirectory:

@@ -16,8 +16,13 @@
 #include <stddef.h>
 
 /* Launches the sidecar with the given working directory.
+ *
+ * ttsKind selects the speech provider ("none", "canned", "chatterbox"). It is
+ * passed as a plain string because this file cannot see the game's options.
+ *
  * Returns 1 on success. On failure, errBuf receives a short diagnostic. */
-int AiProc_Spawn (const char *workingDir, char *errBuf, size_t errCap);
+int AiProc_Spawn (const char *workingDir, const char *ttsKind,
+		char *errBuf, size_t errCap);
 
 /* Terminates the sidecar. Safe when nothing was started. */
 void AiProc_Kill (void);

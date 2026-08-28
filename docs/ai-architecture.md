@@ -350,7 +350,41 @@ enum as `strings.h`: Fwiffo's Pluto lines (`I_FWIFFO`, `WEZZY_WEZZAH`,
 `MUST_DO_RITUAL_AT_HOME`, `DREW_SHORT_STRAW`) form a clean reference set distinct from the
 Spathiwa lines.
 
-A hybrid strategy, better than pure synthesis on every axis that matters:
+### 9.1 How generated audio reaches the track player
+
+This was the one part expected to be hard, and is not. `SpliceTrack` resolves clip names
+through `contentDir`, and `contentDir` is `uio_openDir(repository, "/")` — the repository
+*root*. So a directory mounted there is addressable as ordinary content:
+
+```
+sidecar mkdtemp() ---> "voice_dir" in the handshake ---> uio_mountDir(repository, "/uqmai/")
+                                                              |
+              SpliceTrack("uqmai/line-00007.wav", text) <-----+
+```
+
+No decoder change, no track-player change; WAV is already a supported format. UQM does the
+same thing for `/tmp` in `initTempDir`, though that sits behind an `#if 0` and never runs.
+
+The sidecar owns the directory for its lifetime: it creates it, writes clips, prunes all but
+the most recent few, and removes it on exit. Only a **bare filename** crosses the wire and
+the game refuses any name containing a path separator, so there are two independent reasons
+a model cannot name a file outside it.
+
+Audio is produced only for text that will actually be heard. When an action fires the game
+discards the provisional prose in favour of a narration (3.4), so a `converse` reply is
+voiced only when no action was taken.
+
+Every failure degrades to a subtitle over a borrowed carrier clip: no mount, no synthesis, a
+clip that will not load, or no voice pack at all. Speech is optional in a way the language
+model is not, and a missing one must never stop the game starting.
+
+The `canned` provider replays one of the character's own clips for every line. The words do
+not match, deliberately — it is the only way to tell a broken audio pipeline apart from a
+broken synthesiser, and from inside the game those look identical.
+
+### 9.2 Strategy
+
+A hybrid, better than pure synthesis on every axis that matters:
 
 ```
 AI response

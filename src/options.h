@@ -117,6 +117,7 @@ extern int optNebulaeVolume;
 extern OPT_ENABLABLE optSlaughterMode;
 /* AI Edition: replace fixed dialogue choices with free-text conversation */
 extern OPT_ENABLABLE optAiConversation;
+extern OPT_ENABLABLE optAiVoice;
 extern BOOLEAN optMaskOfDeceit;
 extern OPT_ENABLABLE optAdvancedAutoPilot;
 extern OPT_ENABLABLE optMeleeToolTips;

@@ -53,20 +53,59 @@ resolveWorkingDir (const char *workingDir, char *buf, size_t cap)
 	return buf;
 }
 
+/* Builds the command line, preferring the sidecar's own virtual environment.
+ *
+ * Speech synthesis needs a specific torch build and a model that together run
+ * to gigabytes, so they live in ai/.venv rather than in whatever Python
+ * happens to be on PATH. Without that environment there is no synthesis, so
+ * asking for a voice there gets none rather than a substitute: a canned voice
+ * speaks the wrong words, which is useful for testing the audio path and
+ * baffling for a player.
+ *
+ * cmdline is written into rather than returned because CreateProcessA is
+ * documented to modify the string it is given. */
+static void
+buildCommandLine (const char *dir, const char *ttsKind, char *cmdline,
+		size_t cap)
+{
+	char venvPython[MAX_PATH];
+	DWORD attrs;
+
+	if (ttsKind == NULL)
+		ttsKind = "none";
+
+	if (dir != NULL && dir[0] != '\0')
+	{
+		snprintf (venvPython, sizeof (venvPython),
+				"%s\\.venv\\Scripts\\python.exe", dir);
+		attrs = GetFileAttributesA (venvPython);
+		if (attrs != INVALID_FILE_ATTRIBUTES
+				&& !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+		{
+			snprintf (cmdline, cap,
+					"\"%s\" -m uqm_ai --provider claude --tts %s",
+					venvPython, ttsKind);
+			return;
+		}
+	}
+
+	snprintf (cmdline, cap, "python -m uqm_ai --provider claude --tts none");
+}
+
 int
-AiProc_Spawn (const char *workingDir, char *errBuf, size_t errCap)
+AiProc_Spawn (const char *workingDir, const char *ttsKind,
+		char *errBuf, size_t errCap)
 {
 	SECURITY_ATTRIBUTES sa;
 	STARTUPINFOA si;
 	PROCESS_INFORMATION pi;
 	HANDLE stdinRd = NULL, stdinWr = NULL;
 	HANDLE stdoutRd = NULL, stdoutWr = NULL;
-	/* --tts canned replays one of Fwiffo's own clips for every line. The
-	 * words do not match; it is here to keep the audio path exercised until
-	 * synthesis exists, and is the first thing to change when it does. */
-	char cmdline[] = "python -m uqm_ai --provider claude --tts canned";
+	char cmdline[MAX_PATH + 128];
 	char dirBuf[MAX_PATH];
 	const char *dir = resolveWorkingDir (workingDir, dirBuf, sizeof (dirBuf));
+
+	buildCommandLine (dir, ttsKind, cmdline, sizeof (cmdline));
 
 	sa.nLength = sizeof (SECURITY_ATTRIBUTES);
 	sa.bInheritHandle = TRUE;
@@ -96,6 +135,16 @@ AiProc_Spawn (const char *workingDir, char *errBuf, size_t errCap)
 	si.hStdOutput = stdoutWr;
 	si.hStdError = GetStdHandle (STD_ERROR_HANDLE);
 	si.dwFlags = STARTF_USESTDHANDLES;
+
+	/* Our own stderr is not necessarily inheritable - a redirected one
+	 * generally is not - and without this the child's diagnostics vanish
+	 * entirely. Everything the sidecar reports about itself goes there:
+	 * synthesis timings, provider warnings, tracebacks. They were being
+	 * dropped, which is why the log showed the game's view of the sidecar
+	 * and never the sidecar's view of itself. */
+	if (si.hStdError != NULL && si.hStdError != INVALID_HANDLE_VALUE)
+		SetHandleInformation (si.hStdError, HANDLE_FLAG_INHERIT,
+				HANDLE_FLAG_INHERIT);
 
 	memset (&pi, 0, sizeof (pi));
 
@@ -221,7 +270,8 @@ static int toChild = -1;
 static int fromChild = -1;
 
 int
-AiProc_Spawn (const char *workingDir, char *errBuf, size_t errCap)
+AiProc_Spawn (const char *workingDir, const char *ttsKind,
+		char *errBuf, size_t errCap)
 {
 	int inPipe[2];
 	int outPipe[2];
@@ -262,9 +312,9 @@ AiProc_Spawn (const char *workingDir, char *errBuf, size_t errCap)
 		if (workingDir != NULL && chdir (workingDir) != 0)
 			_exit (127);
 		execlp ("python3", "python3", "-m", "uqm_ai", "--provider", "claude",
-				(char *)NULL);
+				"--tts", ttsKind != NULL ? ttsKind : "none", (char *)NULL);
 		execlp ("python", "python", "-m", "uqm_ai", "--provider", "claude",
-				(char *)NULL);
+				"--tts", ttsKind != NULL ? ttsKind : "none", (char *)NULL);
 		_exit (127);
 	}
 

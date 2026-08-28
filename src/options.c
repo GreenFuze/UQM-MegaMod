@@ -127,6 +127,7 @@ int optScanSphere;
 int optNebulaeVolume;
 OPT_ENABLABLE optSlaughterMode;
 OPT_ENABLABLE optAiConversation;
+OPT_ENABLABLE optAiVoice;
 BOOLEAN optMaskOfDeceit;
 OPT_ENABLABLE optAdvancedAutoPilot;
 OPT_ENABLABLE optMeleeToolTips;

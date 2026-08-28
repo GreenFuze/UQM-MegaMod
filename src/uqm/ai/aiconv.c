@@ -15,6 +15,7 @@
 #include "aiproc.h"
 #include "libs/log.h"
 #include "libs/uio.h"
+#include "options.h"
 
 extern uio_Repository *repository;
 
@@ -177,6 +178,8 @@ AiConv_CapturedText (void)
 
 /* ---- messaging -------------------------------------------------------- */
 
+static BOOLEAN readMessage (char *buf, size_t cap, AiJsonObject *obj);
+
 static BOOLEAN
 sendLine (const char *line)
 {
@@ -232,16 +235,11 @@ handshake (void)
 
 	if (!sendLine ("{\"type\":\"hello\",\"protocol\":1}"))
 		return FALSE;
-	if (!AiProc_ReadLine (line, sizeof line, AI_REPLY_TIMEOUT_MS, aiWaitFn))
+	if (!readMessage (line, sizeof line, &obj))
 	{
 		log_add (log_Warning, "AI: no handshake reply from sidecar");
 		setLastError ("The AI service did not respond. Is Python installed "
 				"and on PATH?");
-		return FALSE;
-	}
-	if (!AiJson_Parse (line, &obj))
-	{
-		log_add (log_Warning, "AI: unparseable handshake reply");
 		return FALSE;
 	}
 
@@ -280,7 +278,12 @@ AiConv_Start (void)
 		return TRUE;
 
 	err[0] = '\0';
-	if (!AiProc_Spawn (AI_WORKING_DIR, err, sizeof err))
+	/* Speech is opt-in. It costs a multi-gigabyte environment, several
+	 * gigabytes of video memory and tens of seconds per line, none of which
+	 * a player who only wants to talk should have to pay. */
+	if (!AiProc_Spawn (AI_WORKING_DIR,
+			optAiVoice == OPTVAL_ENABLED ? "chatterbox" : "none",
+			err, sizeof err))
 	{
 		log_add (log_Warning, "AI: could not start sidecar: %s", err);
 		return FALSE;
@@ -342,23 +345,52 @@ readAudioClip (const AiJsonObject *obj, AI_REPLY *reply)
  * buf carries the request in and the reply out; the two never overlap in
  * time, and one buffer of this size is already the largest thing on the
  * stack here. */
+/* Reads one message, passing the sidecar's own diagnostics into the log.
+ *
+ * The sidecar reports on itself over the protocol rather than on stderr,
+ * because inherited stderr does not survive the way the game is launched and
+ * everything it printed was being dropped. Those lines can arrive at any
+ * point - the voice model warms up on its own thread - so any read may see
+ * them before the message it is actually waiting for. */
+static BOOLEAN
+readMessage (char *buf, size_t cap, AiJsonObject *obj)
+{
+	for (;;)
+	{
+		const char *type;
+
+		if (!AiProc_ReadLine (buf, cap, AI_REPLY_TIMEOUT_MS, aiWaitFn))
+			return FALSE;
+
+		if (!AiJson_Parse (buf, obj))
+		{
+			log_add (log_Warning, "AI: malformed reply");
+			return FALSE;
+		}
+
+		type = AiJson_GetString (obj, "type");
+		if (type == NULL || strcmp (type, "log") != 0)
+			return TRUE;
+
+		{
+			const char *message = AiJson_GetString (obj, "message");
+
+			log_add (log_Info, "AI: %s",
+					message != NULL ? message : "(empty log line)");
+		}
+	}
+}
+
 static BOOLEAN
 exchange (char *buf, size_t cap, const char *expectedType, AiJsonObject *obj)
 {
 	const char *type;
 
-	if (!sendLine (buf)
-			|| !AiProc_ReadLine (buf, cap, AI_REPLY_TIMEOUT_MS, aiWaitFn))
+	if (!sendLine (buf) || !readMessage (buf, cap, obj))
 	{
 		log_add (log_Warning, "AI: sidecar stopped responding");
 		setLastError ("The AI service stopped responding.");
 		aiActive = FALSE;
-		return FALSE;
-	}
-
-	if (!AiJson_Parse (buf, obj))
-	{
-		log_add (log_Warning, "AI: malformed reply");
 		return FALSE;
 	}
 

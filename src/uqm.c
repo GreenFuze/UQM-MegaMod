@@ -201,6 +201,7 @@ struct options_struct
 	DECL_CONFIG_OPTION(int,   nebulaevol);
 	DECL_CONFIG_OPTION(bool,  slaughterMode);
 	DECL_CONFIG_OPTION(bool,  aiConversation);
+	DECL_CONFIG_OPTION(bool,  aiVoice);
 	DECL_CONFIG_OPTION(bool,  advancedAutoPilot);
 	DECL_CONFIG_OPTION(bool,  meleeToolTips);
 	DECL_CONFIG_OPTION(int,   musicResume);
@@ -418,6 +419,7 @@ int main(int argc, char** argv)
 		INIT_CONFIG_OPTION(  nebulaevol,        16 ),
 		INIT_CONFIG_OPTION(  slaughterMode,     false ),
 		INIT_CONFIG_OPTION(  aiConversation,    true ),
+		INIT_CONFIG_OPTION(  aiVoice,           false ),
 		INIT_CONFIG_OPTION(  advancedAutoPilot, false ),
 		INIT_CONFIG_OPTION(  meleeToolTips,     false ),
 		INIT_CONFIG_OPTION(  musicResume,       0 ),
@@ -658,6 +660,7 @@ int main(int argc, char** argv)
 	optNebulaeVolume = options.nebulaevol.value;
 	optSlaughterMode = options.slaughterMode.value;
 	optAiConversation = options.aiConversation.value;
+	optAiVoice = options.aiVoice.value;
 	optAdvancedAutoPilot = options.advancedAutoPilot.value;
 	optMeleeToolTips = options.meleeToolTips.value;
 	optMusicResume = options.musicResume.value;
@@ -1343,6 +1346,8 @@ enum
 	SLAUGHTER_OPT,
 	AICONV_OPT,
 	NOAICONV_OPT,
+	AIVOICE_OPT,
+	NOAIVOICE_OPT,
 	SISADVAP_OPT,
 	MELEETIPS_OPT,
 	MUSICRESUME_OPT,
@@ -1469,6 +1474,8 @@ static struct option longOptions[] =
 	{"slaughtermode", 0, NULL, SLAUGHTER_OPT},
 	{"ai", 0, NULL, AICONV_OPT},
 	{"no-ai", 0, NULL, NOAICONV_OPT},
+	{"ai-voice", 0, NULL, AIVOICE_OPT},
+	{"no-ai-voice", 0, NULL, NOAIVOICE_OPT},
 	{"advancedautopilot", 0, NULL, SISADVAP_OPT},
 	{"meleetooltips", 0, NULL, MELEETIPS_OPT},
 	{"musicresume", 1, NULL, MUSICRESUME_OPT},
@@ -2278,6 +2285,12 @@ parseOptions (int argc, char *argv[], struct options_struct *options)
 				break;
 			case NOAICONV_OPT:
 				setBoolOption (&options->aiConversation, false);
+				break;
+			case AIVOICE_OPT:
+				setBoolOption (&options->aiVoice, true);
+				break;
+			case NOAIVOICE_OPT:
+				setBoolOption (&options->aiVoice, false);
 				break;
 			case SISADVAP_OPT:
 				setBoolOption (&options->advancedAutoPilot, true);
