@@ -274,7 +274,15 @@ Three tiers, in increasing volatility:
 |---|---|---|
 | **Persona** | Authored per character — voice, temperament, verbal tics, worldview | Never |
 | **Canonical knowledge** | The character's NPC phrase texts, as both fact and voice reference | Per character |
-| **Permitted knowledge** | Filtered by `PHRASE_ENABLED` at request time | Every turn |
+| **Permitted knowledge** | What the story has unlocked, evaluated per turn | Every turn |
+
+> This row previously claimed the filter was `PHRASE_ENABLED` at request time.
+> That never shipped, and it could not have: `DISABLE_PHRASE` writes a NUL into
+> the in-memory string table, which is reloaded per encounter, so it is
+> per-hail scratch state rather than a record of story position. What shipped
+> was narrower still — the phrases the character had already *spoken this
+> conversation*. The gate is now derived from named game-state flags and the
+> in-game date. See [character-knowledge-model.md](character-knowledge-model.md).
 
 The third tier is the anti-spoiler mechanism, and it matters because the base model
 already knows Star Control II. Fwiffo cannot discuss the Spathiwa coordinates before that
