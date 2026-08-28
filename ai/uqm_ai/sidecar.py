@@ -11,9 +11,10 @@ import sys
 from typing import IO
 
 from . import gamelog
+from .cast import Cast, CastError
 from .pagination import paginate
-from .voice import VoiceDirectory
 from .persona import PromptBuilder
+from .voice import VoiceDirectory
 from .protocol import (
     MAX_SPOKEN_TEXT,
     PROTOCOL_VERSION,
@@ -29,7 +30,12 @@ from .providers.base import LLMProvider, ProviderError, TTSProvider
 
 
 class Sidecar:
-    """Serves conversation turns for one character.
+    """Serves conversation turns for every character the cast can voice.
+
+    One process, not one per character: the speech model costs 23 seconds to
+    load and is shared, and the game keeps the sidecar alive across encounters
+    anyway. The character is chosen per request from session.character, which
+    the game has always sent and nothing used to read.
 
     Holds its streams for its lifetime and flushes after every message, since
     the game is blocking on a line-oriented read.
@@ -37,14 +43,14 @@ class Sidecar:
 
     def __init__(
         self,
-        builder: PromptBuilder,
+        cast: Cast,
         llm: LLMProvider,
         tts: TTSProvider | None = None,
         stdin: IO[str] | None = None,
         stdout: IO[str] | None = None,
         log: IO[str] | None = None,
     ) -> None:
-        self._builder = builder
+        self._cast = cast
         self._llm = llm
         self._tts = tts
         self._in = stdin if stdin is not None else sys.stdin
@@ -100,7 +106,19 @@ class Sidecar:
             "voice_dir": self._voice.native_path if self._voice else "",
         }
 
-    def _speak(self, text: str) -> str | None:
+    def _builder_for(self, character: str) -> PromptBuilder:
+        """The prompt builder for the character this request is addressed to.
+
+        An unknown or unauthored character is a protocol error, not a crash:
+        the game logs it and falls back to that race's own dialogue menu, which
+        is how a partially authored cast ships safely.
+        """
+        try:
+            return self._cast.builder(character)
+        except CastError as exc:
+            raise ProtocolError(str(exc)) from exc
+
+    def _speak(self, text: str, character: str) -> str | None:
         """Synthesise one line and return its bare filename, or None.
 
         Called only for text that will actually be spoken. Failure is never
@@ -112,7 +130,7 @@ class Sidecar:
 
         path, name = self._voice.next_file()
         try:
-            self._tts.synthesise(text, self._builder.profile.key, str(path))
+            self._tts.synthesise(text, character, str(path))
         except Exception as exc:  # noqa: BLE001 - a mute line beats a dead turn
             self._warn(f"synthesis failed, falling back to subtitles: {exc}")
             return None
@@ -120,7 +138,10 @@ class Sidecar:
         self._voice.prune()
         return name
 
-    def _spoken_keys(self, refs: tuple[int, ...]) -> tuple[str, ...]:
+    @staticmethod
+    def _spoken_keys(
+        builder: PromptBuilder, refs: tuple[int, ...]
+    ) -> tuple[str, ...]:
         """The canonical phrases the character has actually spoken.
 
         Those are what he may draw on: he can repeat and elaborate on his own
@@ -129,7 +150,7 @@ class Sidecar:
         """
         return tuple(
             key
-            for key in (self._builder.key_for_ref(ref) for ref in refs)
+            for key in (builder.key_for_ref(ref) for ref in refs)
             if key is not None
         )
 
@@ -140,10 +161,13 @@ class Sidecar:
         list, because there is no decision left: the handler ran, the state
         changed, and this call only decides how it sounds.
         """
-        prompt = self._builder.render(
-            permitted_keys=self._spoken_keys(request.spoken_refs),
+        builder = self._builder_for(request.session.character)
+        prompt = builder.render(
+            permitted_keys=self._spoken_keys(builder, request.spoken_refs),
             memory=(),
             visits=0,
+            state=request.state,
+            today=request.game_date,
         )
 
         spoken = to_display_text(self._llm.narrate(request, prompt).strip())
@@ -157,23 +181,38 @@ class Sidecar:
             "type": "narrate",
             "id": request.id,
             "spoken_text": paginate(spoken),
-            "audio_file": self._speak(spoken),
+            "audio_file": self._speak(spoken, request.session.character),
         }
 
     def _converse(self, request: ConverseRequest) -> dict:
         # The game identifies actions by numeric RESPONSE_REF, since enum
         # names do not exist at runtime in C. Resolve them so the persona and
         # the provider can reason about names.
-        request = request.with_resolved_keys(self._builder.key_for_ref)
+        builder = self._builder_for(request.session.character)
+        request = request.with_resolved_keys(builder.key_for_ref)
 
-        permitted = request.available_knowledge or self._spoken_keys(
-            request.spoken_refs
+        # The permitted set is a union, not a choice. The floor is what the
+        # character has already said this conversation; on top of that go the
+        # canonical phrases this point in the story has unlocked. A character
+        # with no knowledge entries therefore behaves exactly as Fwiffo does.
+        spoken = self._spoken_keys(builder, request.spoken_refs)
+        unlocked = builder.unlocked_keys(request.state, request.game_date)
+        permitted = tuple(
+            dict.fromkeys(request.available_knowledge + spoken + unlocked)
         )
 
-        prompt = self._builder.render(
+        prompt = builder.render(
             permitted_keys=permitted,
             memory=request.memory,
             visits=request.visits,
+            state=request.state,
+            today=request.game_date,
+        )
+        gamelog.emit(
+            f"{request.session.character}: {len(request.state)} flags, "
+            f"{len(permitted)} phrases permitted, "
+            f"{len(builder.profile.active_denials(request.state, request.game_date))} "
+            f"denials, on {request.game_date.isoformat()}"
         )
 
         # The provider is untrusted: whatever it returns is re-checked against
@@ -194,7 +233,9 @@ class Sidecar:
         # game discards this prose and asks for a narration of the outcome
         # instead, so voicing it here would pay for audio nobody plays.
         if response.action is None:
-            payload["audio_file"] = self._speak(response.spoken_text)
+            payload["audio_file"] = self._speak(
+                response.spoken_text, request.session.character
+            )
 
         return payload
 

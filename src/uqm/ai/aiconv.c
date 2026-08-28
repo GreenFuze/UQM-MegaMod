@@ -13,6 +13,7 @@
 #include "aiconv.h"
 #include "aijson.h"
 #include "aiproc.h"
+#include "aistate.h"
 #include "libs/log.h"
 #include "libs/uio.h"
 #include "options.h"
@@ -36,9 +37,14 @@ static BOOLEAN aiSuppressPhrases = FALSE;
 static int aiNextRequestId = 1;
 static AiProc_WaitFn aiWaitFn = NULL;
 
-#define AI_MAX_SPOKEN 64
+/* Sized for the largest character rather than for Fwiffo. Starbase has 116
+ * NPCPhrase call sites and a long visit will pass 64, after which the
+ * character quietly stops being grounded in what he just said - a failure
+ * with no symptom except gradually worse answers. */
+#define AI_MAX_SPOKEN 256
 static int aiSpoken[AI_MAX_SPOKEN];
 static int aiSpokenCount = 0;
+static BOOLEAN aiSpokenFull = FALSE;
 
 /* Actions the player has dispatched this conversation. */
 #define AI_MAX_DISPATCHED 64
@@ -72,8 +78,19 @@ AiConv_NoteSpoken (int phraseRef)
 {
 	int i;
 
-	if (phraseRef <= 0 || aiSpokenCount >= AI_MAX_SPOKEN)
+	if (phraseRef <= 0)
 		return;
+	if (aiSpokenCount >= AI_MAX_SPOKEN)
+	{	/* Once, not per phrase: this would otherwise fill the log. */
+		if (!aiSpokenFull)
+		{
+			log_add (log_Warning, "AI: spoken-phrase buffer full at %d; the "
+					"character is no longer grounded in all he has said",
+					AI_MAX_SPOKEN);
+			aiSpokenFull = TRUE;
+		}
+		return;
+	}
 	for (i = 0; i < aiSpokenCount; ++i)
 	{
 		if (aiSpoken[i] == phraseRef)
@@ -86,6 +103,7 @@ void
 AiConv_ForgetSpoken (void)
 {
 	aiSpokenCount = 0;
+	aiSpokenFull = FALSE;
 }
 
 void
@@ -420,11 +438,67 @@ beginRequest (AiJsonWriter *w, char *buf, size_t cap, const char *type,
 	AiJson_WriteString (w, "type", type);
 	AiJson_WriteInt (w, "id", requestId);
 
-	AiJson_WriteString (w, "session_save_id", "slot0");
-	AiJson_WriteString (w, "session_character", "fwiffo");
-	AiJson_WriteString (w, "session_encounter", "SPATHI_PLUTO");
+	{	/* The dialogue resource name is the character's identity, and it is
+		 * already sitting in CommData - see AiState_CharacterId. NULL only
+		 * outside a conversation, where the sidecar answers a protocol error
+		 * and the game falls back to its own menu. */
+		const char *character = AiState_CharacterId ();
+		int day = 0, month = 0, year = 0;
+		char date[16];
+
+		AiJson_WriteString (w, "session_save_id", "slot0");
+		AiJson_WriteString (w, "session_character",
+				character != NULL ? character : "");
+		AiJson_WriteString (w, "session_encounter",
+				character != NULL ? character : "");
+
+		AiState_Date (&day, &month, &year);
+		snprintf (date, sizeof date, "%04d-%02d-%02d", year, month, day);
+		AiJson_WriteString (w, "game_date", date);
+	}
 
 	AiJson_WriteString (w, "player_input", playerInput);
+}
+
+/* Where the story has got to, as NAME=VALUE strings.
+ *
+ * An array of strings rather than an object because the writer has no keyed
+ * nested-object support, and 453 top-level fields would be grotesque. Only
+ * non-zero flags are sent: absent already means zero to the sidecar, which is
+ * getGameStateUint's own contract for an unset property. */
+static void
+writeState (AiJsonWriter *w)
+{
+	AI_STATE_ENTRY entries[AI_MAX_STATE];
+	char pair[AIJSON_MAX_VALUE];
+	int count;
+	int i;
+
+	count = AiState_Collect (entries, AI_MAX_STATE);
+	if (count >= AI_MAX_STATE)
+		log_add (log_Warning, "AI: state buffer full at %d entries; some "
+				"knowledge will not unlock", count);
+
+	{	/* The operator-visible surface for auditing a wrong answer: who is
+		 * speaking, when, and how much of the world they were told about.
+		 * See docs/character-knowledge-model.md section 6. */
+		const char *who = AiState_CharacterId ();
+		int day = 0, month = 0, year = 0;
+
+		AiState_Date (&day, &month, &year);
+		log_add (log_Info, "AI: character=%s date=%04d-%02d-%02d state=%d flags",
+				who != NULL ? who : "(none)", year, month, day, count);
+	}
+
+	AiJson_BeginArray (w, "state");
+	for (i = 0; i < count; ++i)
+	{
+		AiJson_WriteRawElement (w);
+		snprintf (pair, sizeof pair, "%s=%u",
+				entries[i].name, entries[i].value);
+		AiJson_WriteString (w, NULL, pair);
+	}
+	AiJson_EndArray (w);
 }
 
 static void
@@ -476,6 +550,7 @@ buildRequest (char *buf, size_t cap, int requestId, const char *playerInput,
 	beginRequest (&w, buf, cap, "converse", requestId, playerInput);
 	writeActions (&w, actions, numActions);
 	writeSpokenRefs (&w);
+	writeState (&w);
 
 	AiJson_WriteInt (&w, "visits", visits);
 	AiJson_EndObject (&w);
@@ -492,6 +567,7 @@ buildNarrateRequest (char *buf, size_t cap, int requestId,
 	beginRequest (&w, buf, cap, "narrate", requestId, playerInput);
 	AiJson_WriteString (&w, "authored_text", authoredText);
 	writeSpokenRefs (&w);
+	writeState (&w);
 	AiJson_EndObject (&w);
 
 	return AiJson_WriterOk (&w);

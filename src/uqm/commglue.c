@@ -207,7 +207,19 @@ NPCPhrase_cb (int index, CallbackFunction cb)
 	 * a generated line claim an outcome the handler had just refused. */
 	if (AiConv_PhrasesSuppressed ())
 	{
-		if (!StarSeed && luaUqm_comm_stringNeedsInterpolate (pStr))
+		/* Interpolated regardless of StarSeed, unlike the paths below.
+		 *
+		 * With seeding on, the game does not interpolate here: it goes on to
+		 * chunk the string and splice robot-voice clips for the star names,
+		 * which is what the robot phoneme table is for. We take none of that
+		 * audio - generated speech is synthesised from the text - so the only
+		 * thing skipping interpolation achieved was handing the model a raw
+		 * "<% comm.getStarName(...) %>" to either echo or invent a
+		 * replacement for. 222 phrases carry one.
+		 *
+		 * luaUqm_comm_stringInterpolate returns the RESEEDED name, so this is
+		 * also the truthful text rather than the 1992 default. */
+		if (luaUqm_comm_stringNeedsInterpolate (pStr))
 		{
 			pStr = luaUqm_comm_stringInterpolate (pStr);
 			AiConv_CaptureText (pStr);

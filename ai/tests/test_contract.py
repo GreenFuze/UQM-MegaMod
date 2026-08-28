@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from uqm_ai.cast import Cast
 from uqm_ai.dialogue import DialogueFile
 from uqm_ai.persona import FWIFFO, PromptBuilder
 from uqm_ai.phrase_table import PhraseTable, StringsHeader
@@ -58,7 +59,7 @@ def make_request(text: str, actions: list[str], **context) -> ConverseRequest:
             "id": 1,
             "session": {
                 "save_id": "slot1",
-                "character": "fwiffo",
+                "character": "comm.spathi.dialogue",
                 "encounter": "SPATHI_PLUTO",
             },
             "player_input": text,
@@ -75,6 +76,12 @@ def make_request(text: str, actions: list[str], **context) -> ConverseRequest:
 @pytest.fixture(scope="module")
 def builder() -> PromptBuilder:
     return PromptBuilder(FWIFFO, TABLE)
+
+
+@pytest.fixture(scope="module")
+def cast() -> Cast:
+    """The real cast: the sidecar now picks a character per request."""
+    return Cast(REPO, CONTENT)
 
 
 class TestPhraseTable:
@@ -319,10 +326,10 @@ class TestSidecarResilience:
     """The sidecar must always answer, so the game can always fall back."""
 
     @staticmethod
-    def _run(builder: PromptBuilder, provider: LLMProvider, lines: list[str]) -> list[dict]:
+    def _run(cast: Cast, provider: LLMProvider, lines: list[str]) -> list[dict]:
         out = io.StringIO()
         Sidecar(
-            builder,
+            cast,
             provider,
             stdin=io.StringIO("\n".join(lines) + "\n"),
             stdout=out,
@@ -330,33 +337,33 @@ class TestSidecarResilience:
         ).run()
         return [json.loads(line) for line in out.getvalue().splitlines()]
 
-    def test_handshake_reports_tts_unavailable(self, builder: PromptBuilder) -> None:
+    def test_handshake_reports_tts_unavailable(self, cast: Cast) -> None:
         # tts:false is a supported state, not an error: subtitles without voice.
-        replies = self._run(builder, MockProvider(), ['{"type":"hello"}'])
+        replies = self._run(cast, MockProvider(), ['{"type":"hello"}'])
         assert replies[0]["type"] == "ready"
         assert replies[0]["tts"] is False
         assert replies[0]["llm"] is True
 
-    def test_provider_failure_yields_error_not_crash(self, builder: PromptBuilder) -> None:
+    def test_provider_failure_yields_error_not_crash(self, cast: Cast) -> None:
         request = json.dumps(
             {
                 "type": "converse",
                 "id": 5,
                 "session": {
                     "save_id": "s",
-                    "character": "fwiffo",
+                    "character": "comm.spathi.dialogue",
                     "encounter": "SPATHI_PLUTO",
                 },
                 "player_input": "hello",
                 "actions": [{"ref": 84, "text": "Come.", "terminal": True}],
             }
         )
-        replies = self._run(builder, BrokenProvider(), [request])
+        replies = self._run(cast, BrokenProvider(), [request])
         assert replies[0]["type"] == "error"
         assert replies[0]["id"] == 5, "error must be correlatable to the request"
         assert replies[0]["code"] == "provider_error"
 
-    def test_narrate_carries_the_encounter_outcome(self, builder: PromptBuilder) -> None:
+    def test_narrate_carries_the_encounter_outcome(self, cast: Cast) -> None:
         # The defect this guards against: a generated line agreeing to
         # something the encounter had just refused. The refusal is authored
         # text produced by the handler, and it must reach the player.
@@ -366,13 +373,13 @@ class TestSidecarResilience:
                 "type": "narrate",
                 "id": 9,
                 "session_save_id": "s",
-                "session_character": "fwiffo",
+                "session_character": "comm.spathi.dialogue",
                 "player_input": "Join us, we will keep you safe.",
                 "authored_text": refusal,
                 "spoken_refs": [],
             }
         )
-        replies = self._run(builder, MockProvider(), [request])
+        replies = self._run(cast, MockProvider(), [request])
 
         assert replies[0]["type"] == "narrate"
         assert replies[0]["id"] == 9
@@ -382,7 +389,7 @@ class TestSidecarResilience:
         assert "action" not in replies[0], "narrate must never carry an action"
 
     def test_generated_text_is_folded_to_renderable_ascii(
-        self, builder: PromptBuilder
+        self, cast: Cast
     ) -> None:
         # UQM's bitmap fonts have no glyph for typographic punctuation, so a
         # model writing an em-dash by habit puts a box in the subtitle.
@@ -390,11 +397,12 @@ class TestSidecarResilience:
             {
                 "type": "narrate",
                 "id": 13,
+                "session_character": "comm.spathi.dialogue",
                 "player_input": "hello",
                 "authored_text": "I am— as it were —“fine”…",
             }
         )
-        replies = self._run(builder, MockProvider(), [request])
+        replies = self._run(cast, MockProvider(), [request])
 
         spoken = replies[0]["spoken_text"]
         assert all(ord(ch) < 128 for ch in spoken), spoken
@@ -402,12 +410,12 @@ class TestSidecarResilience:
         assert "..." in spoken
 
     def test_narrate_without_authored_text_is_rejected(
-        self, builder: PromptBuilder
+        self, cast: Cast
     ) -> None:
         # An empty outcome would leave the model free to invent one, which is
         # the whole failure this path exists to close.
         replies = self._run(
-            builder,
+            cast,
             MockProvider(),
             ['{"type":"narrate","id":11,"player_input":"hi","authored_text":""}'],
         )
@@ -415,14 +423,14 @@ class TestSidecarResilience:
         assert replies[0]["id"] == 11
         assert replies[0]["code"] == "protocol_error"
 
-    def test_malformed_input_does_not_stop_the_loop(self, builder: PromptBuilder) -> None:
+    def test_malformed_input_does_not_stop_the_loop(self, cast: Cast) -> None:
         replies = self._run(
-            builder, MockProvider(), ["not json", '{"type":"hello"}']
+            cast, MockProvider(), ["not json", '{"type":"hello"}']
         )
         assert replies[0]["type"] == "error"
         assert replies[1]["type"] == "ready", "loop must survive bad input"
 
-    def test_unknown_message_type_is_reported(self, builder: PromptBuilder) -> None:
-        replies = self._run(builder, MockProvider(), ['{"type":"launch_missiles","id":3}'])
+    def test_unknown_message_type_is_reported(self, cast: Cast) -> None:
+        replies = self._run(cast, MockProvider(), ['{"type":"launch_missiles","id":3}'])
         assert replies[0]["type"] == "error"
         assert replies[0]["id"] == 3

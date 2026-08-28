@@ -18,6 +18,11 @@
 #include <stddef.h>
 #include "libs/compiler.h"
 
+/* Room for every named game state flag plus the derived SIS_ values. The
+ * table in save.c holds 453; only the non-zero ones are ever sent, so this is
+ * a ceiling rather than a working size. */
+#define AI_MAX_STATE      512
+
 #define AI_MAX_ACTIONS    24
 #define AI_MAX_TEXT       2048
 /* One dispatch can emit several canonical phrases in a row, and all of them

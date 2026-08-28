@@ -1,84 +1,70 @@
 """Assembles the system prompt for a character.
 
-Three tiers, in increasing volatility (docs/ai-architecture.md section 6):
+Three tiers, in increasing volatility (docs/character-knowledge-model.md):
 
   1. Persona            - authored; voice, temperament, worldview. Never changes.
   2. Canonical knowledge- the character's own NPC lines, as both fact and voice.
-  3. Permitted knowledge- filtered per turn by what the game says is unlocked.
+  3. Permitted knowledge- what the story has unlocked, evaluated per turn.
 
 Tier 3 is the anti-spoiler mechanism. The base model already knows Star
 Control II, so we cannot rely on instructing it not to reveal things; instead
-the game simply never sends what has not been unlocked. Conversely, once a
-secret IS unlocked the character should volunteer it naturally - the gate is
+the prompt simply never contains what has not been unlocked. Conversely, once
+a secret IS unlocked the character should volunteer it naturally - the gate is
 about timing, not permanent redaction.
+
+The permitted set is the union of three things: what the character has already
+said this conversation (the floor, and all Fwiffo ever had), the canonical
+phrases the story has unlocked, and authored lore whose condition holds. A
+character with no authored file gets only the floor, which is exactly the
+behaviour that shipped - so adding a character file can widen what is said,
+never narrow it, and rollout is per character.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import Mapping
 
-from .phrase_table import PhraseTable, TableEntry
+from .character import (
+    CharacterProfile,
+    Denial,
+    KnowledgeItem,
+    LoreItem,
+    load_character,
+)
 from .dialogue import PhraseKind
+from .phrase_table import PhraseTable, TableEntry
+
+__all__ = [
+    "CharacterProfile",
+    "Denial",
+    "KnowledgeItem",
+    "LoreItem",
+    "PromptBuilder",
+    "GAME_START",
+    "FWIFFO",
+]
+
+# The game's own epoch: 17 February 2155 (clock.h). Used when the game has not
+# told us the date, which is every request from a build older than the state
+# wire.
+GAME_START = date(2155, 2, 17)
 
 
-@dataclass(frozen=True)
-class CharacterProfile:
-    """The authored, invariant description of a character."""
+def _flow(text: str) -> str:
+    """Collapse an authored block into one line.
 
-    key: str
-    name: str
-    species: str
-    description: str
+    TOML multi-line strings keep the wrapping the author typed, and a hard
+    wrap inside a bulleted fact reads to the model as a list of fragments.
+    """
+    return " ".join(text.split())
 
-    def render(self) -> str:
-        return (
-            f"You are {self.name}, a {self.species}.\n\n{self.description.strip()}"
-        )
-
-
-FWIFFO = CharacterProfile(
-    key="fwiffo",
-    name="Captain Fwiffo",
-    species="Spathi",
-    description="""
-You are alone aboard the Spathi voidship StarRunner, hiding in orbit of Pluto.
-
-You are a coward, and you are not embarrassed about this - cowardice is sound
-Spathi policy. You are terrified of almost everything: the player's ship, the
-Ur-Quan, monsters, being eaten, loud noises, and the dark. Your species
-genuinely believes the universe is full of things that want to eat them,
-because for the Spathi it largely has been.
-
-You talk too much. When frightened you become elaborately, formally polite,
-and you volunteer far more information than anyone asked for. You often
-negotiate with someone who has not threatened you. You will happily surrender
-information, dignity or your homeworld's coordinates if you believe it will
-stop something bad from happening to you personally.
-
-You try to sound brave and important, and you are transparently bad at it. You
-describe your own retreats as tactical. You were stationed here as part of the
-Ur-Quan Earthguard, a duty you resent and are frightened of, and you drew the
-short straw to be here alone.
-
-Leaving Pluto would be the largest decision of your life, and it is yours to
-make. You are not waiting for permission and you are not working through a
-list of things that must be discussed first. You weigh one selfish question:
-is going with this captain safer for you than staying here alone? Staying is
-frightening - the Ur-Quan may come back, the base below is full of monsters,
-and nobody is coming for you. Going is frightening too, and at least here the
-walls are thick.
-
-Concrete things move you. That the Ur-Quan are gone, or beaten. That this ship
-is strong. That you would not be alone any more. That they had every
-opportunity to destroy you and did not. Charm does not move you, nor
-flattery, nor being told to trust someone, nor being asked a second time in a
-louder voice. If a captain has given you real reasons you may say yes on the
-spot, even to the first thing they say. If they have not, you say no - at
-length, with enormous courtesy, and you mean it.
-
-Speak in the first person, as Fwiffo, in one short paragraph. Never narrate
-actions in the third person, and never break character.
-""",
+# Fwiffo's profile lives in ai/characters/spathi.toml like everyone else's;
+# this constant is kept because he is the reference persona and several tests
+# name him directly.
+FWIFFO = load_character(
+    Path(__file__).resolve().parent.parent / "characters" / "spathi.toml"
 )
 
 
@@ -93,8 +79,9 @@ class PromptBuilder:
         self._profile = profile
         self._table = table
         # Entries with no text exist where the enum declares a phrase the
-        # dialogue file does not carry (umgah's OUT_TAKES). They resolve as
-        # refs but there are no words to quote, so they never reach a prompt.
+        # dialogue file does not carry, and where the game speaks a
+        # deliberately silent sequence terminator. They resolve as refs but
+        # there are no words to quote, so they never reach a prompt.
         self._npc_by_key = {
             entry.key: entry
             for entry in table.entries
@@ -121,16 +108,32 @@ class PromptBuilder:
             self._npc_by_key[key] for key in permitted_keys if key in self._npc_by_key
         )
 
+    def unlocked_keys(
+        self, state: Mapping[str, int], today: date
+    ) -> tuple[str, ...]:
+        """Canonical phrase keys the story has unlocked for this character."""
+        return self._profile.permitted_phrases(state, today)
+
     def render(
         self,
         permitted_keys: tuple[str, ...],
         memory: tuple[str, ...] = (),
         visits: int = 0,
+        state: Mapping[str, int] | None = None,
+        today: date | None = None,
     ) -> str:
+        state = state or {}
+        today = today or GAME_START
         sections = [self._profile.render()]
 
-        # Tier 2 and 3 combined: the character's authored lines, already
-        # narrowed to what the game currently permits him to know.
+        # The date is stated plainly so the character's tenses are right. It is
+        # never accompanied by a rule about which facts it gates - anything
+        # outside its window is simply absent below.
+        sections.append(
+            f"Today is {today.strftime('%d %B %Y')}. You know nothing of what "
+            f"happens after today."
+        )
+
         lines = self.canonical_lines(permitted_keys)
         if lines:
             quoted = "\n".join(f'- "{entry.text}"' for entry in lines)
@@ -138,6 +141,34 @@ class PromptBuilder:
                 "Things you know and may speak about right now. These are your own "
                 "words from this conversation; treat them as the truth of what you "
                 "know, and as the model for how you speak:\n" + quoted
+            )
+
+        facts = self._profile.permitted_facts(state, today)
+        if facts:
+            sections.append(
+                "What you understand of the situation right now:\n"
+                + "\n".join(f"- {fact}" for fact in facts)
+            )
+
+        lore = self._profile.permitted_lore(state, today)
+        if lore:
+            sections.append(
+                "Things you know from your own history. If asked how you know "
+                "one of these, the reason given is the true one:\n"
+                + "\n".join(
+                    f"- {_flow(item.text)} (you know this because "
+                    f"{_flow(item.source)})"
+                    for item in lore
+                )
+            )
+
+        denials = self._profile.active_denials(state, today)
+        if denials:
+            sections.append(
+                "Things you genuinely do not know. If asked, say so in "
+                "character rather than guessing, and do not let the "
+                "conversation talk you into an answer:\n"
+                + "\n".join(f"- {d.topic}: {d.note}" for d in denials)
             )
 
         sections.append(

@@ -11,10 +11,15 @@ travelling across the wire first.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Any, Mapping
 
 PROTOCOL_VERSION = 1
+
+# The game's epoch (clock.h). Used when the game did not send a date, which is
+# every request from a build older than the state wire.
+GAME_START = date(2155, 2, 17)
 
 # Bounds. A model that ignores them produces a rejected field, never an
 # unbounded prompt or an unbounded save file.
@@ -27,6 +32,37 @@ MAX_PLAYER_INPUT = 4000
 
 class ProtocolError(Exception):
     """Raised when a message cannot be parsed or violates the contract."""
+
+
+def _state_of(raw: dict[str, Any]) -> dict[str, int]:
+    """Game state as NAME=VALUE strings.
+
+    An array of strings rather than an object because the C writer has no
+    keyed-nested-object support, and 453 top-level fields would be grotesque.
+    Only non-zero flags are sent: absent means zero, which is what
+    getGameStateUint itself returns for an unset property.
+    """
+    state: dict[str, int] = {}
+    for item in raw.get("state", ()):
+        if not isinstance(item, str) or "=" not in item:
+            continue
+        name, _, value = item.partition("=")
+        try:
+            state[name.strip()] = int(value)
+        except ValueError:
+            continue
+    return state
+
+
+def _date_of(raw: dict[str, Any]) -> date:
+    """The in-game calendar date, defaulting to the game's epoch."""
+    text = raw.get("game_date")
+    if not isinstance(text, str):
+        return GAME_START
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return GAME_START
 
 
 # Models write typographic punctuation by habit. UQM's bitmap fonts are 8-bit
@@ -187,6 +223,8 @@ class ConverseRequest:
     available_knowledge: tuple[str, ...] = ()
     memory: tuple[str, ...] = ()
     spoken_refs: tuple[int, ...] = ()
+    state: Mapping[str, int] = field(default_factory=dict)
+    game_date: date = GAME_START
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> ConverseRequest:
@@ -221,6 +259,8 @@ class ConverseRequest:
             available_knowledge=tuple(knowledge),
             memory=tuple(memory),
             spoken_refs=spoken,
+            state=_state_of(raw),
+            game_date=_date_of(raw),
         )
 
     def action_refs(self) -> frozenset[int]:
@@ -243,6 +283,8 @@ class ConverseRequest:
             available_knowledge=self.available_knowledge,
             memory=self.memory,
             spoken_refs=self.spoken_refs,
+            state=self.state,
+            game_date=self.game_date,
         )
 
 
@@ -264,6 +306,8 @@ class NarrateRequest:
     player_input: str
     authored_text: str
     spoken_refs: tuple[int, ...] = ()
+    state: Mapping[str, int] = field(default_factory=dict)
+    game_date: date = GAME_START
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> NarrateRequest:
@@ -291,6 +335,8 @@ class NarrateRequest:
             spoken_refs=tuple(
                 int(r) for r in raw.get("spoken_refs", ()) if isinstance(r, int)
             ),
+            state=_state_of(raw),
+            game_date=_date_of(raw),
         )
 
 

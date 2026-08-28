@@ -15,6 +15,10 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .cast import Cast
 
 
 @dataclass(frozen=True)
@@ -29,12 +33,11 @@ class Problem:
 
 
 class Preflight:
-    """Runs the startup checks for one character's data and the provider."""
+    """Runs the startup checks for the whole cast and the provider."""
 
-    def __init__(self, repo: Path, header: Path, dialogue: Path) -> None:
+    def __init__(self, repo: Path, cast: "Cast") -> None:
         self._repo = repo
-        self._header = header
-        self._dialogue = dialogue
+        self._cast = cast
 
     def run(self, provider: str, live: bool = True) -> list[Problem]:
         problems: list[Problem] = []
@@ -48,23 +51,45 @@ class Preflight:
         return problems
 
     def _check_content(self) -> list[Problem]:
+        """Build every authored character's table, and report all failures.
+
+        All of them, not the first: three races failed for three unrelated
+        reasons, and finding them one game-launch at a time is how that went
+        unnoticed for as long as it did.
+        """
         found: list[Problem] = []
 
-        if not self._header.is_file():
+        if not self._cast.served:
             found.append(
                 Problem(
-                    f"phrase enum not found: {self._header}",
-                    "run from the game checkout; --repo must point at uqm-megamod",
+                    "no authored characters found",
+                    "check ai/characters/ contains at least one .toml",
                 )
             )
-        if not self._dialogue.is_file():
-            found.append(
-                Problem(
-                    f"canonical dialogue not found: {self._dialogue}",
+
+        for resource in sorted(self._cast.served):
+            spec = self._cast.spec(resource)
+            if not spec.header.is_file():
+                found.append(Problem(
+                    f"phrase enum not found: {spec.header}",
+                    "run from the game checkout; --repo must point at uqm-megamod",
+                ))
+                continue
+            if not spec.dialogue.is_file():
+                found.append(Problem(
+                    f"canonical dialogue not found: {spec.dialogue}",
                     "clone UQM-MegaMod-Content next to the game checkout "
                     "(see docs/build.md)",
-                )
-            )
+                ))
+                continue
+            try:
+                self._cast.builder(resource)
+            except Exception as exc:  # noqa: BLE001 - reported, not raised
+                found.append(Problem(
+                    f"{resource} cannot be loaded: {exc}",
+                    "the phrase enum and the dialogue file disagree; see "
+                    "docs/conversation-corpus.md section 5",
+                ))
         return found
 
     def _check_sdk(self) -> list[Problem]:

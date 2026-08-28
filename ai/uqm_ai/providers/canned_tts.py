@@ -14,37 +14,53 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Mapping
 
 from ..voice import AudioError, decode_to_wav
 from .base import ProviderError, TTSProvider
 
 
 class CannedTTS(TTSProvider):
-    """Returns a fixed clip, transcoded to WAV, for every line."""
+    """Returns one of the speaking character's own clips for every line.
 
-    def __init__(self, source_clip: Path) -> None:
-        if not source_clip.is_file():
-            raise ProviderError(f"canned voice clip not found: {source_clip}")
-        self._source = source_clip
-        self._wav: Path | None = None
+    The clip is chosen by character, so at least the wrong words are in the
+    right voice - which is what makes it useful for checking that the game
+    mounted the directory and loaded the file.
+    """
+
+    def __init__(self, sources: Mapping[str, Path]) -> None:
+        missing = sorted(k for k, p in sources.items() if not Path(p).is_file())
+        if missing:
+            raise ProviderError(f"canned voice clips not found for: {missing}")
+        if not sources:
+            raise ProviderError("canned voice needs at least one clip")
+        self._sources = dict(sources)
+        self._wav: dict[str, Path] = {}
 
     @property
     def name(self) -> str:
         return "canned"
 
     def synthesise(self, text: str, character: str, out_path: str) -> str:
-        del text, character  # deliberately ignored; that is what "canned" means
+        del text  # deliberately ignored; that is what "canned" means
 
-        # Decoded once, so every later line is a file copy.
-        if self._wav is None:
+        source = self._sources.get(character)
+        if source is None:
+            raise ProviderError(f"no canned clip for {character!r}")
+
+        # Decoded once per character, so every later line is a file copy.
+        wav = self._wav.get(character)
+        if wav is None:
+            safe = character.replace(".", "-")
             try:
-                self._wav = decode_to_wav(
-                    self._source,
-                    Path(out_path).parent / "canned-source.wav",
+                wav = decode_to_wav(
+                    source,
+                    Path(out_path).parent / f"canned-{safe}.wav",
                     sample_rate=22050,
                 )
             except AudioError as exc:
                 raise ProviderError(str(exc)) from exc
+            self._wav[character] = wav
 
-        shutil.copyfile(self._wav, out_path)
+        shutil.copyfile(wav, out_path)
         return out_path

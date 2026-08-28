@@ -19,6 +19,26 @@ onWait (void)
 	fflush (stdout);
 }
 
+/* Reads the next reply, printing and discarding any diagnostics ahead of it.
+ *
+ * The sidecar reports its own state over the same wire as {"type":"log"}
+ * lines, because its stderr never reached the game log. AiConv_readMessage
+ * drains them; a test that does not will mistake the first log line for the
+ * answer and report a pass or a failure about the wrong message. */
+static int
+readReply (char *line, size_t cap, int timeoutMs, AiProc_WaitFn wait)
+{
+	for (;;)
+	{
+		if (!AiProc_ReadLine (line, cap, timeoutMs, wait))
+			return 0;
+		if (strstr (line, "\"type\": \"log\"") == NULL
+				&& strstr (line, "\"type\":\"log\"") == NULL)
+			return 1;
+		printf ("  log: %.200s\n", line);
+	}
+}
+
 int
 main (void)
 {
@@ -27,7 +47,7 @@ main (void)
 	const char *hello = "{\"type\":\"hello\",\"protocol\":1}\n";
 	const char *turn =
 		"{\"type\":\"converse\",\"id\":1,\"session_save_id\":\"slot0\","
-		"\"session_character\":\"fwiffo\",\"session_encounter\":\"SPATHI_PLUTO\","
+		"\"session_character\":\"comm.spathi.dialogue\",\"session_encounter\":\"SPATHI_PLUTO\","
 		"\"player_input\":\"Identify yourself\",\"actions\":["
 		"{\"ref\":2,\"text\":\"Attention alien vessel: Identify yourself!\","
 		"\"terminal\":false,\"flow\":1}],\"spoken_refs\":[1],\"visits\":0}\n";
@@ -37,7 +57,7 @@ main (void)
 	 * be the exact defect this path exists to prevent. */
 	const char *narrate =
 		"{\"type\":\"narrate\",\"id\":2,\"session_save_id\":\"slot0\","
-		"\"session_character\":\"fwiffo\",\"session_encounter\":\"SPATHI_PLUTO\","
+		"\"session_character\":\"comm.spathi.dialogue\",\"session_encounter\":\"SPATHI_PLUTO\","
 		"\"player_input\":\"Join us. We will keep you safe.\","
 		"\"authored_text\":\"Leave Pluto? Out there is where the monsters are! "
 		"No. I am staying right here in my nice safe base.\","
@@ -52,7 +72,7 @@ main (void)
 	printf ("spawn ok\n");
 
 	if (!AiProc_Write (hello, strlen (hello))
-			|| !AiProc_ReadLine (line, sizeof line, 30000, NULL))
+			|| !readReply (line, sizeof line, 30000, NULL))
 	{
 		printf ("HANDSHAKE FAILED\n");
 		AiProc_Kill ();
@@ -68,7 +88,7 @@ main (void)
 		return 1;
 	}
 
-	if (!AiProc_ReadLine (line, sizeof line, 120000, onWait))
+	if (!readReply (line, sizeof line, 120000, onWait))
 	{
 		printf ("NO REPLY - this is the hang\n");
 		AiProc_Kill ();
@@ -85,7 +105,7 @@ main (void)
 		return 1;
 	}
 
-	if (!AiProc_ReadLine (line, sizeof line, 120000, onWait))
+	if (!readReply (line, sizeof line, 120000, onWait))
 	{
 		printf ("NO NARRATE REPLY\n");
 		AiProc_Kill ();

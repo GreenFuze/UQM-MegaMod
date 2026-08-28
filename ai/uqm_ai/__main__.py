@@ -13,22 +13,11 @@ from pathlib import Path
 from typing import IO
 
 from . import gamelog
-from .dialogue import DialogueFile
-from .persona import FWIFFO, PromptBuilder
-from .phrase_table import PhraseTable, StringsHeader
+from .cast import Cast
 from .preflight import Preflight, report
 from .providers.base import LLMProvider, ProviderError, TTSProvider
 from .providers.mock import MockProvider
 from .sidecar import Sidecar
-
-# Characters we can serve, and where their data lives relative to the repo.
-_CHARACTERS = {
-    "fwiffo": (
-        FWIFFO,
-        "src/uqm/comm/spathi/strings.h",
-        "../uqm-megamod-content/base/comm/spathi/spathi.txt",
-    ),
-}
 
 
 def _claim_wire() -> IO[str]:
@@ -61,24 +50,42 @@ def _claim_wire() -> IO[str]:
     return wire
 
 
-# Fwiffo's own voice, used both as the canned stand-in and as the reference
-# a cloner imitates. Derived on the player's machine from the voice pack they
-# already have; nothing cloned is ever shipped.
-_FWIFFO_CLIP = "addons/mm-3dovoice/spathi/spathi-001.ogg"
+def _reference_clips(repo: Path, cast: Cast) -> dict[str, Path]:
+    """One reference recording per character, from the player's own content.
+
+    Each character's own voice, derived on the player's machine from the voice
+    pack they already have. Nothing cloned is committed, downloaded from us, or
+    shipped; the only thing that makes the model sound like anyone is a file
+    already in their content directory.
+
+    A character with no recording is simply absent, and speaks in subtitles.
+    """
+    content = repo.parent / "uqm-megamod-content" / "addons" / "mm-3dovoice"
+    clips: dict[str, Path] = {}
+
+    for resource in sorted(cast.served):
+        spec = cast.spec(resource)
+        name = cast.profile(resource).voice_clip or f"{spec.content_key}-001.ogg"
+        path = content / spec.content_key / name
+        if path.is_file():
+            clips[resource] = path
+    return clips
 
 
-def _build_tts(kind: str, repo: Path) -> TTSProvider:
-    clip = repo.parent / "uqm-megamod-content" / _FWIFFO_CLIP
+def _build_tts(kind: str, repo: Path, cast: Cast) -> TTSProvider:
+    clips = _reference_clips(repo, cast)
+    if not clips:
+        raise ProviderError("no voice references found; is the 3DO voice pack installed?")
 
     if kind == "canned":
         from .providers.canned_tts import CannedTTS
 
-        return CannedTTS(clip)
+        return CannedTTS(clips)
 
     if kind == "chatterbox":
         from .providers.chatterbox_tts import ChatterboxVoice
 
-        return ChatterboxVoice(clip)
+        return ChatterboxVoice(clips)
 
     raise ProviderError(f"unknown tts provider {kind!r}")
 
@@ -88,7 +95,13 @@ def main(argv: list[str] | None = None) -> int:
     gamelog.attach(wire)
 
     parser = argparse.ArgumentParser(prog="uqm_ai")
-    parser.add_argument("--character", default="fwiffo", choices=sorted(_CHARACTERS))
+    parser.add_argument(
+        "--character",
+        default=None,
+        help="dialogue resource to pre-warm, e.g. comm.spathi.dialogue. "
+             "Every authored character is served regardless; this only "
+             "decides which table is built before the first request",
+    )
     parser.add_argument(
         "--repo",
         type=Path,
@@ -117,14 +130,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    profile, header_rel, dialogue_rel = _CHARACTERS[args.character]
-    header = args.repo / header_rel
-    dialogue = args.repo / dialogue_rel
+    # Resolving the cast reads the trees and every character file, so a
+    # malformed condition or a flag the game does not have stops the sidecar
+    # here with a reason rather than mid-conversation.
+    try:
+        cast = Cast(args.repo, args.repo.parent / "uqm-megamod-content")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[uqm-ai] cannot resolve the cast: {exc}", file=sys.stderr)
+        wire.write(
+            json.dumps({"type": "fatal", "message": str(exc)}, ensure_ascii=False)
+            + "\n"
+        )
+        wire.flush()
+        return 2
 
     # Checked before anything else: each of these has previously failed in a
     # way that looked like the game hanging rather than like a missing
     # prerequisite.
-    problems = Preflight(args.repo, header, dialogue).run(
+    problems = Preflight(args.repo, cast).run(
         args.provider, live=not args.skip_live_check
     )
     if problems:
@@ -140,16 +163,20 @@ def main(argv: list[str] | None = None) -> int:
         wire.flush()
         return 4
     if args.preflight:
-        print("[uqm-ai] all checks passed", file=sys.stderr)
+        print(
+            f"[uqm-ai] all checks passed; serving {len(cast.served)} of "
+            f"{len(cast.specs)} characters",
+            file=sys.stderr,
+        )
         return 0
 
-    # Fail fast and loudly on missing data: a sidecar that starts without its
-    # canonical text would silently generate an out-of-character stranger.
-    try:
-        table = PhraseTable(StringsHeader(header), DialogueFile(dialogue))
-    except Exception as exc:  # noqa: BLE001
-        print(f"[uqm-ai] cannot load {args.character}: {exc}", file=sys.stderr)
-        return 2
+    if args.character:
+        # Pre-warm one table so the first turn does not pay for parsing it.
+        try:
+            cast.builder(args.character)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[uqm-ai] cannot load {args.character}: {exc}", file=sys.stderr)
+            return 2
 
     # Fail loudly on a provider that cannot start: silently falling back to
     # the mock would look like a working AI producing very poor writing.
@@ -171,12 +198,15 @@ def main(argv: list[str] | None = None) -> int:
     tts: TTSProvider | None = None
     if args.tts != "none":
         try:
-            tts = _build_tts(args.tts, args.repo)
+            tts = _build_tts(args.tts, args.repo, cast)
         except Exception as exc:  # noqa: BLE001 - never fatal
             print(f"[uqm-ai] no generated speech: {exc}", file=sys.stderr)
 
-    Sidecar(PromptBuilder(profile, table), provider, tts=tts,
-            stdout=wire).run()
+    gamelog.emit(
+        f"serving {len(cast.served)} of {len(cast.specs)} characters: "
+        + ", ".join(sorted(cast.served))
+    )
+    Sidecar(cast, provider, tts=tts, stdout=wire).run()
     return 0
 
 

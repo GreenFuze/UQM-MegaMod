@@ -490,6 +490,7 @@ editbin /REBASE:BASE=0x400000 /DYNAMICBASE:NO "$(LocalDebuggerWorkingDirectory)$
 
     <ClCompile Include="..\..\src\uqm\ai\aijson.c" />
     <ClCompile Include="..\..\src\uqm\ai\aiproc.c" />
+    <ClCompile Include="..\..\src\uqm\ai\aistate.c" />
 
     <ClCompile Include="..\..\src\uqm\commglue.c" />
     <ClCompile Include="..\..\src\uqm\confirm.c" />
@@ -922,6 +923,7 @@ editbin /REBASE:BASE=0x400000 /DYNAMICBASE:NO "$(LocalDebuggerWorkingDirectory)$
 
     <ClInclude Include="..\..\src\uqm\ai\aijson.h" />
     <ClInclude Include="..\..\src\uqm\ai\aiproc.h" />
+    <ClInclude Include="..\..\src\uqm\ai\aistate.h" />
 
     <ClInclude Include="..\..\src\uqm\commglue.h" />
     <ClInclude Include="..\..\src\uqm\cons_res.h" />

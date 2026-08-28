@@ -1,13 +1,17 @@
-"""Fwiffo's own voice, cloned zero-shot from the recordings the game ships.
+"""Each character's own voice, cloned zero-shot from the recordings they ship.
 
-The reference is built on the player's machine from the voice pack they
-already have. Nothing cloned is committed, downloaded from us, or shipped:
-the model is a general-purpose one, and the only thing that makes it sound
-like Fwiffo is a file already sitting in their content directory.
+References are built on the player's machine from the voice pack they already
+have. Nothing cloned is committed, downloaded from us, or shipped: the model is
+a general-purpose one, and the only thing that makes it sound like anyone is a
+file already sitting in their content directory.
 
-Chatterbox is MIT-licensed and needs no training - a few seconds of clean
-reference audio is enough - which is why it is the first thing tried rather
-than fine-tuning, despite there being 336 seconds of aligned corpus available
+One model serves the whole cast - it costs 23 seconds to load and 3 GiB of
+VRAM, so a process per character is not an option - and the reference clip is
+what decides who is speaking.
+
+Chatterbox is MIT-licensed and needs no training: a few seconds of clean
+reference audio is enough, which is why it is the first thing tried rather than
+fine-tuning, despite there being 336 seconds of aligned Spathi corpus available
 if that turns out to be necessary.
 """
 
@@ -17,6 +21,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Mapping
 
 from .. import gamelog
 from ..voice import AudioError, decode_to_wav
@@ -36,27 +41,28 @@ class ChatterboxVoice(TTSProvider):
 
     def __init__(
         self,
-        reference_clip: Path,
+        reference_clips: Mapping[str, Path],
         device: str | None = None,
         exaggeration: float = 0.5,
         cfg_weight: float = 0.5,
     ) -> None:
-        if not reference_clip.is_file():
-            raise ProviderError(f"voice reference not found: {reference_clip}")
+        if not reference_clips:
+            raise ProviderError("voice cloning needs at least one reference clip")
+        missing = sorted(k for k, p in reference_clips.items() if not Path(p).is_file())
+        if missing:
+            raise ProviderError(f"voice references not found for: {missing}")
 
         self._exaggeration = exaggeration
         self._cfg_weight = cfg_weight
         self._work = Path(tempfile.mkdtemp(prefix="uqm-ai-ref-"))
+        self._clips = dict(reference_clips)
 
-        try:
-            self._reference = decode_to_wav(
-                reference_clip,
-                self._work / "reference.wav",
-                sample_rate=REFERENCE_RATE,
-                seconds=REFERENCE_SECONDS,
-            )
-        except AudioError as exc:
-            raise ProviderError(str(exc)) from exc
+        # Decoded on first use per character rather than all at once: a player
+        # speaks to two or three characters in a session, and ffmpeg on 27
+        # files at startup is time nobody gets back.
+        self._references: dict[str, Path] = {}
+        self._warm_key = sorted(self._clips)[0]
+        self._reference = self._reference_for(self._warm_key)
 
         self._model = None
         self._load_error: BaseException | None = None
@@ -71,6 +77,30 @@ class ChatterboxVoice(TTSProvider):
     @property
     def name(self) -> str:
         return "chatterbox"
+
+    def _reference_for(self, character: str) -> Path:
+        """The decoded reference for one character, cut to a few clean seconds."""
+        reference = self._references.get(character)
+        if reference is not None:
+            return reference
+
+        clip = self._clips.get(character)
+        if clip is None:
+            raise ProviderError(f"no voice reference for {character!r}")
+
+        safe = character.replace(".", "-")
+        try:
+            reference = decode_to_wav(
+                clip,
+                self._work / f"reference-{safe}.wav",
+                sample_rate=REFERENCE_RATE,
+                seconds=REFERENCE_SECONDS,
+            )
+        except AudioError as exc:
+            raise ProviderError(str(exc)) from exc
+
+        self._references[character] = reference
+        return reference
 
     def _load(self) -> None:
         try:
@@ -109,7 +139,9 @@ class ChatterboxVoice(TTSProvider):
             self._ready.set()
 
     def synthesise(self, text: str, character: str, out_path: str) -> str:
-        del character  # one voice per sidecar; the reference decides it
+        # One model, many voices: the reference clip decides who is speaking,
+        # and it is the character's own recording from the player's content.
+        reference = self._reference_for(character)
 
         self._ready.wait()
         if self._model is None:
@@ -120,7 +152,7 @@ class ChatterboxVoice(TTSProvider):
         started = time.perf_counter()
         wav = self._model.generate(
             text,
-            audio_prompt_path=str(self._reference),
+            audio_prompt_path=str(reference),
             exaggeration=self._exaggeration,
             cfg_weight=self._cfg_weight,
         )
@@ -139,7 +171,7 @@ class ChatterboxVoice(TTSProvider):
 
         seconds = wav.shape[-1] / self._model.sr
         gamelog.emit(
-            f"spoke {len(text)} chars as {seconds:.1f}s of audio "
+            f"{character}: spoke {len(text)} chars as {seconds:.1f}s of audio "
             f"in {time.perf_counter() - started:.1f}s"
         )
         return out_path
