@@ -45,4 +45,17 @@ void AiState_Date (int *day, int *month, int *year);
  * NULL outside a conversation. */
 const char *AiState_CharacterId (void);
 
+/* Which save slot this game came from or was last written to.
+ *
+ * The game keeps no such global of its own - SaveGame and LoadGame take
+ * which_game and nothing retains it - so save.c and load.c call the setter and
+ * this holds it. Memory needs it: without a save identity every playthrough
+ * would share one store, and a character would greet a brand-new captain by
+ * name.
+ *
+ * Negative until a game has been saved or loaded, which is the case for a
+ * fresh start that has never been written. */
+void AiState_NoteSaveSlot (int slot);
+int AiState_SaveSlot (void);
+
 #endif /* UQM_AI_AISTATE_H */

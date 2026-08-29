@@ -2399,6 +2399,12 @@ InitCommunication (CONVERSATION which_comm)
 		return 0;
 #endif
 
+	/* Told before the per-conversation state is dropped, because this is the
+	 * last moment the character's identity is still known. The sidecar
+	 * summarises the meeting on its own thread; nothing is read back, so
+	 * leaving a conversation never waits on a model. */
+	AiConv_EndEncounter ();
+
 	/* Per-conversation AI state. Neither of these was ever being cleared,
 	 * so a second encounter began with the first one's history and the
 	 * spoken list quietly filled to its cap and stopped recording. */

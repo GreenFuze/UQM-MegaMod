@@ -14,6 +14,7 @@ from typing import IO
 
 from . import gamelog
 from .cast import Cast
+from .memory import MemoryStore
 from .preflight import Preflight, report
 from .providers.base import LLMProvider, ProviderError, TTSProvider
 from .providers.mock import MockProvider
@@ -206,7 +207,11 @@ def main(argv: list[str] | None = None) -> int:
         f"serving {len(cast.served)} of {len(cast.specs)} characters: "
         + ", ".join(sorted(cast.served))
     )
-    Sidecar(cast, provider, tts=tts, stdout=wire).run()
+    # Memory persists between launches, keyed on the save the game names.
+    # Entries carry the in-game date they were written on, so loading an
+    # earlier save discards anything dated after it - see memory.py.
+    memory = MemoryStore(args.repo / "ai" / "data" / "memory")
+    Sidecar(cast, provider, tts=tts, stdout=wire, memory=memory).run()
     return 0
 
 

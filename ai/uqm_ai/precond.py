@@ -95,6 +95,29 @@ class Flag:
 
 
 @dataclass(frozen=True)
+class Bit:
+    """One bit of a flag the game uses as a bitmask.
+
+    Several flags are registers rather than values. STARBASE_BULLETS is 32 bits,
+    one per news item, set once the Commander has delivered it; KNOW_HOMEWORLD
+    is 18; PKUNK_REASONS and ZOQFOT_KNOW_MASK are smaller ones.
+
+    This exists because seven of the Commander's bulletins fire on
+    CheckAlliance(), which reads the ship list rather than game state. The bit
+    is the only evidence on the wire that the news ever happened.
+    """
+
+    name: str
+    index: int
+
+    def evaluate(self, state: Mapping[str, int], today: date) -> bool:
+        return bool((int(state.get(self.name, 0)) >> self.index) & 1)
+
+    def flags(self) -> frozenset[str]:
+        return frozenset({self.name})
+
+
+@dataclass(frozen=True)
 class When:
     """A comparison against the in-game calendar."""
 
@@ -253,8 +276,26 @@ class _Parser:
                 )
             return When(op[1], date.fromisoformat(value[1]))
 
-        # A bare flag name means "is set".
         following = self._peek()
+
+        # NAME bit N - one bit of a bitmask flag.
+        if (following is not None and following[0] == "name"
+                and following[1] == "bit"):
+            self._take()
+            index = self._take()
+            if index[0] != "int":
+                raise PreconditionError(
+                    f"'bit' needs a number in {self._text!r}, got {index[1]!r}"
+                )
+            position = int(index[1])
+            if not 0 <= position <= 31:
+                raise PreconditionError(
+                    f"bit {position} is out of range in {self._text!r}; "
+                    f"the widest flag the game has is 32 bits"
+                )
+            return Bit(text, position)
+
+        # A bare flag name means "is set".
         if following is None or following[0] != "op":
             return Flag(text, "!=", 0)
 

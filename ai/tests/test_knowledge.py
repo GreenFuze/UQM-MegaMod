@@ -365,53 +365,249 @@ class TestTemplateReduction:
 class TestMemory:
     """Recall must survive a conversation and not survive a reload.
 
-    The hazard this guards is specific: a player loads a save from before a
-    revelation, and the character remembers a conversation that has not
-    happened in that timeline and spoils the plot to prove it.
+    The hazard is specific: a player loads a save from before a revelation, and
+    the character remembers a conversation that has not happened in that
+    timeline and spoils the plot to prove it.
     """
 
-    def test_recall_is_per_character(self) -> None:
+    def store(self, tmp_path: Path, limit: int = 8):
         from uqm_ai.memory import MemoryStore
 
-        store = MemoryStore()
-        store.remember("comm.spathi.dialogue", date(2155, 3, 1), "He panicked.")
-        assert store.recall("comm.spathi.dialogue", date(2155, 6, 1))
-        assert not store.recall("comm.urquan.dialogue", date(2155, 6, 1))
+        return MemoryStore(tmp_path / "memory", limit=limit)
 
-    def test_loading_an_earlier_save_drops_the_future(self) -> None:
-        from uqm_ai.memory import MemoryStore
+    def test_recall_is_per_character(self, tmp_path: Path) -> None:
+        store = self.store(tmp_path)
+        store.remember("slot0", "comm.spathi.dialogue", date(2155, 3, 1), "He panicked.")
+        assert store.recall("slot0", "comm.spathi.dialogue", date(2155, 6, 1))
+        assert not store.recall("slot0", "comm.urquan.dialogue", date(2155, 6, 1))
 
-        store = MemoryStore()
-        store.remember("x", date(2155, 3, 1), "early")
-        store.remember("x", date(2157, 3, 1), "late")
-        assert store.recall("x", date(2157, 6, 1)) == ("early", "late")
+    def test_recall_is_per_save(self, tmp_path: Path) -> None:
+        # Two playthroughs must not share a memory; without a real save id
+        # a character would greet a brand-new captain by name.
+        store = self.store(tmp_path)
+        store.remember("slot0", "x", date(2155, 3, 1), "first game")
+        assert not store.recall("slot3", "x", date(2155, 6, 1))
+
+    def test_loading_an_earlier_save_drops_the_future(self, tmp_path: Path) -> None:
+        store = self.store(tmp_path)
+        store.remember("slot0", "x", date(2155, 3, 1), "early")
+        store.remember("slot0", "x", date(2157, 3, 1), "late")
+        assert len(store.recall("slot0", "x", date(2157, 6, 1))) == 2
 
         # The player reloads a save from 2156. The 2157 meeting did not happen.
-        assert store.recall("x", date(2156, 1, 1)) == ("early",)
+        assert len(store.recall("slot0", "x", date(2156, 1, 1))) == 1
         # and it is gone, not merely hidden
-        assert store.recall("x", date(2157, 6, 1)) == ("early",)
+        assert len(store.recall("slot0", "x", date(2157, 6, 1))) == 1
 
-    def test_the_same_beat_is_not_remembered_twice(self) -> None:
-        from uqm_ai.memory import MemoryStore
+    def test_recall_carries_how_long_ago(self, tmp_path: Path) -> None:
+        store = self.store(tmp_path)
+        store.remember("slot0", "x", date(2155, 3, 1), "he asked about the bomb")
+        recalled = store.recall("slot0", "x", date(2155, 9, 1))
+        assert "months ago" in recalled[0]
+        assert "he asked about the bomb" in recalled[0]
 
-        store = MemoryStore()
+    def test_the_same_beat_is_not_remembered_twice(self, tmp_path: Path) -> None:
+        store = self.store(tmp_path)
         for _ in range(3):
-            store.remember("x", date(2155, 3, 1), "He panicked.")
+            store.remember("slot0", "x", date(2155, 3, 1), "He panicked.")
         assert len(store) == 1
 
-    def test_recall_is_bounded(self) -> None:
-        from uqm_ai.memory import MemoryStore
-
-        store = MemoryStore(limit=3)
+    def test_recall_is_bounded(self, tmp_path: Path) -> None:
+        store = self.store(tmp_path, limit=3)
         for day in range(1, 9):
-            store.remember("x", date(2155, 3, day), f"meeting {day}")
-        recalled = store.recall("x", date(2156, 1, 1))
+            store.remember("slot0", "x", date(2155, 3, day), f"meeting {day}")
+        recalled = store.recall("slot0", "x", date(2156, 1, 1))
         assert len(recalled) == 3
-        assert recalled[-1] == "meeting 8"      # oldest dropped, newest kept
+        assert "meeting 8" in recalled[-1]      # oldest dropped, newest kept
 
-    def test_empty_text_is_not_a_memory(self) -> None:
-        from uqm_ai.memory import MemoryStore
-
-        store = MemoryStore()
-        store.remember("x", date(2155, 3, 1), "   ")
+    def test_empty_text_is_not_a_memory(self, tmp_path: Path) -> None:
+        store = self.store(tmp_path)
+        store.remember("slot0", "x", date(2155, 3, 1), "   ")
         assert len(store) == 0
+
+    def test_memory_survives_a_restart(self, tmp_path: Path) -> None:
+        first = self.store(tmp_path)
+        first.remember("slot0", "x", date(2155, 3, 1), "they met at the starbase")
+
+        second = self.store(tmp_path)      # a fresh process, same save
+        assert second.recall("slot0", "x", date(2155, 6, 1))
+
+    def test_a_corrupt_store_is_forgotten_not_fatal(self, tmp_path: Path) -> None:
+        (tmp_path / "memory").mkdir(parents=True)
+        (tmp_path / "memory" / "slot0.json").write_text("{ not json", encoding="utf-8")
+        assert self.store(tmp_path).recall("slot0", "x", date(2155, 6, 1)) == ()
+
+
+class TestElapsed:
+    @pytest.mark.parametrize(
+        "days,expected",
+        [(0, "earlier today"), (1, "yesterday"), (5, "5 days ago"),
+         (21, "3 weeks ago"), (90, "about 3 months ago"), (400, "about 13 months ago"),
+         (900, "over 2 years ago")],
+    )
+    def test_phrasing(self, days: int, expected: str) -> None:
+        from datetime import timedelta
+
+        from uqm_ai.memory import elapsed
+
+        then = date(2155, 2, 17)
+        assert elapsed(then, then + timedelta(days=days)) == expected
+
+
+class TestRecap:
+    """A finished conversation becomes one line, off the critical path."""
+
+    def test_a_finished_encounter_is_remembered(self, tmp_path: Path) -> None:
+        from uqm_ai.memory import MemoryStore
+        from uqm_ai.providers.mock import MockProvider
+        from uqm_ai.recap import Encounter, Recapper
+
+        store = MemoryStore(tmp_path / "memory")
+        encounter = Encounter(save_id="slot0", character="x")
+        encounter.add("hello", "greetings")
+        encounter.add("who are you", "I am nobody")
+
+        thread = Recapper(MockProvider(), store).finish(encounter, date(2155, 3, 1))
+        thread.join(timeout=5)
+
+        recalled = store.recall("slot0", "x", date(2155, 4, 1))
+        assert recalled and "2 times" in recalled[0]
+
+    def test_an_empty_encounter_is_not_remembered(self, tmp_path: Path) -> None:
+        from uqm_ai.memory import MemoryStore
+        from uqm_ai.providers.mock import MockProvider
+        from uqm_ai.recap import Encounter, Recapper
+
+        store = MemoryStore(tmp_path / "memory")
+        empty = Encounter(save_id="slot0", character="x")
+        assert Recapper(MockProvider(), store).finish(empty, date(2155, 3, 1)) is None
+        assert len(store) == 0
+
+    def test_the_transcript_is_bounded(self) -> None:
+        from uqm_ai.recap import MAX_TURNS, Encounter
+
+        encounter = Encounter(save_id="slot0", character="x")
+        for n in range(MAX_TURNS + 10):
+            encounter.add(f"q{n}", f"a{n}")
+        assert len(encounter.turns) == MAX_TURNS
+        assert encounter.turns[-1] == (f"q{MAX_TURNS + 9}", f"a{MAX_TURNS + 9}")
+
+
+class TestVoice:
+    """Length and register are characterisation, so they are per character."""
+
+    def test_every_character_states_a_reply_length(self, cast: Cast) -> None:
+        # A chat-trained model left to itself writes an essay. The closing
+        # instruction is the only thing standing between that and a game
+        # character, so no file may be silent about it.
+        for resource in cast.served:
+            assert cast.profile(resource).reply_length.strip()
+
+    def test_the_length_instruction_reaches_the_prompt(self, cast: Cast) -> None:
+        builder = cast.builder(STARBASE)
+        prompt = builder.render(permitted_keys=(), state={}, today=TODAY)
+        assert builder.profile.reply_length in prompt
+        assert "never offer the captain a list of options" in prompt
+
+    def test_register_reaches_the_prompt(self, cast: Cast) -> None:
+        builder = cast.builder(STARBASE)
+        prompt = builder.render(permitted_keys=(), state={}, today=TODAY)
+        assert "career officer" in prompt
+
+    def test_brevity_is_not_uniform(self, cast: Cast) -> None:
+        # Fwiffo's verbosity is the joke and the Kohr-Ah's brevity is the
+        # threat. A single global cap would flatten both.
+        lengths = {
+            cast.profile(r).reply_length for r in cast.served
+        }
+        assert len(lengths) > 3
+
+    def test_characters_who_never_swear_say_so(self, cast: Cast) -> None:
+        # The register field must be explicit in both directions: silence
+        # would leave the model to guess, and it guesses towards chat.
+        for resource in ("comm.urquan.dialogue", "comm.kohrah.dialogue",
+                         "comm.druuge.dialogue", "comm.spathi.dialogue"):
+            register = cast.profile(resource).register or ""
+            assert "do not swear" in register, resource
+
+
+class TestPromptBudget:
+    """Everything permitted is quoted verbatim, and that has to stay affordable.
+
+    Retrieval was considered and rejected: a prompt keyed on player input
+    changes every turn and defeats caching, which is worth far more than the
+    tokens it would save.
+    """
+
+    def test_no_character_is_extravagant(self, cast: Cast) -> None:
+        for resource in cast.served:
+            builder = cast.builder(resource)
+            profile = builder.profile
+            wide = {flag: 9 for flag in profile.flags()}
+            wide.update({
+                "MELNORME_EVENTS_INFO_STACK": 8,
+                "MELNORME_ALIEN_INFO_STACK": 16,
+                "MELNORME_HISTORY_INFO_STACK": 9,
+                "STARBASE_BULLETS": 0xFFFFFFFF,
+            })
+            prompt = builder.render(
+                permitted_keys=builder.unlocked_keys(wide, TODAY),
+                state=wide, today=TODAY,
+            )
+            # This is a synthetic ceiling - every flag at once, every bulletin
+            # bit set - and not reachable in play, since supersedes retires
+            # much of it. Measured worst case is starbase at ~40k chars,
+            # about 10k tokens, which is affordable and caches. The bound is
+            # here to catch a file growing into a problem, not to pin a number.
+            assert len(prompt) < 60000, f"{resource} renders {len(prompt)} chars"
+
+
+class TestBulletins:
+    """Past news: the bit is set, the visit is over, the captain asks again."""
+
+    ALL_NEWS = {"STARBASE_BULLETS": 0xFFFFFFFF}
+
+    def test_nothing_is_recalled_before_it_was_reported(self, cast: Cast) -> None:
+        keys = cast.builder(STARBASE).unlocked_keys({}, TODAY)
+        assert not [k for k in keys if k.startswith("STARBASE_BULLETIN")]
+
+    def test_a_delivered_bulletin_can_be_asked_about_later(self, cast: Cast) -> None:
+        # bit 5 is the Arilou arriving and gifting three ships - the case where
+        # a player reasonably asks "where did these ships come from?"
+        keys = cast.builder(STARBASE).unlocked_keys(
+            {"STARBASE_BULLETS": 1 << 5}, TODAY
+        )
+        assert "STARBASE_BULLETIN_6" in keys
+        assert "STARBASE_BULLETIN_1" not in keys
+
+    def test_the_druuge_verdict_supersedes_the_rumour(self, cast: Cast) -> None:
+        profile = cast.profile(STARBASE)
+        both = {"STARBASE_BULLETS": (1 << 26) | (1 << 29)}
+        ids = {i.id for i in profile._live_knowledge(both, TODAY)}
+        assert "news_slave_trader" in ids
+        assert "news_druuge_rumour" not in ids
+
+    def test_all_the_news_still_fits(self, cast: Cast) -> None:
+        keys = cast.builder(STARBASE).unlocked_keys(self.ALL_NEWS, TODAY)
+        bulletins = [k for k in keys if k.startswith("STARBASE_BULLETIN")]
+        # 23 slots are used, but with every bit set the slave-trader verdict
+        # supersedes the rumour and the evidence - he does not deliver three
+        # escalating opinions of the same crime at once.
+        assert len(bulletins) == 21
+
+
+class TestDeviceMemory:
+    """He remembers an analysis he gave, after the device has gone."""
+
+    def test_analysis_survives_the_device_leaving(self, cast: Cast) -> None:
+        builder = cast.builder(STARBASE)
+        aboard = builder.unlocked_keys({"TAALO_PROTECTOR_ON_SHIP": 1}, TODAY)
+        assert "ABOUT_SHIELD" in aboard
+
+        # The captain takes it and uses it. He still analysed it personally.
+        after = builder.unlocked_keys({"DISCUSSED_TAALO_PROTECTOR": 1}, TODAY)
+        assert "ABOUT_SHIELD" in after
+
+    def test_he_cannot_analyse_what_he_never_saw(self, cast: Cast) -> None:
+        keys = cast.builder(STARBASE).unlocked_keys({}, TODAY)
+        assert "ABOUT_SHIELD" not in keys

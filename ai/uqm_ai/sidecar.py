@@ -13,13 +13,16 @@ from typing import IO
 from . import gamelog
 from .cast import Cast, CastError
 from .memory import MemoryStore
+from .recap import Encounter, Recapper
 from .pagination import paginate
 from .persona import PromptBuilder
 from .voice import VoiceDirectory
 from .protocol import (
     MAX_SPOKEN_TEXT,
+    GAME_START,
     PROTOCOL_VERSION,
     ConverseRequest,
+    EncounterEnd,
     NarrateRequest,
     ProtocolError,
     ResponseValidator,
@@ -50,6 +53,7 @@ class Sidecar:
         stdin: IO[str] | None = None,
         stdout: IO[str] | None = None,
         log: IO[str] | None = None,
+        memory: MemoryStore | None = None,
     ) -> None:
         self._cast = cast
         self._llm = llm
@@ -58,9 +62,11 @@ class Sidecar:
         self._out = stdout if stdout is not None else sys.stdout
         self._log = log if log is not None else sys.stderr
         self._voice = VoiceDirectory() if tts is not None else None
-        # Session-scoped and guarded by the in-game date; see memory.py
-        # for why it is not a file.
-        self._memory = MemoryStore()
+        self._memory = memory if memory is not None else MemoryStore()
+        self._recap = Recapper(llm, self._memory, self._warn)
+        # What has been said in the conversation now in progress, if any.
+        self._encounter: Encounter | None = None
+        self._last_date = GAME_START
 
     def run(self) -> None:
         """Serve until stdin closes."""
@@ -81,6 +87,11 @@ class Sidecar:
             kind = payload.get("type")
             if kind == "hello":
                 self._send(self._hello_reply())
+                return
+            if kind == "encounter_end":
+                # A notification, not a request. The game does not wait, so
+                # there is nothing to reply to.
+                self._end_encounter(EncounterEnd.from_json(payload))
                 return
             if kind == "narrate":
                 self._send(self._narrate(NarrateRequest.from_json(payload)))
@@ -158,6 +169,29 @@ class Sidecar:
             if key is not None
         )
 
+    def _current(self, save_id: str, character: str) -> Encounter:
+        """The conversation in progress, starting one if the character changed.
+
+        The game sends encounter_end, but a crash or a hard quit will not, so
+        a change of character also closes the previous meeting rather than
+        letting two conversations blur into one recollection.
+        """
+        current = self._encounter
+        if current is not None and current.character != character:
+            self._recap.finish(current, self._last_date)
+            current = None
+        if current is None:
+            current = Encounter(save_id=save_id, character=character)
+            self._encounter = current
+        return current
+
+    def _end_encounter(self, notice: EncounterEnd) -> None:
+        current = self._encounter
+        self._encounter = None
+        if current is None or current.character != notice.character:
+            return
+        self._recap.finish(current, notice.game_date)
+
     def _narrate(self, request: NarrateRequest) -> dict:
         """Reword an outcome the encounter has already produced and applied.
 
@@ -192,6 +226,7 @@ class Sidecar:
         # The game identifies actions by numeric RESPONSE_REF, since enum
         # names do not exist at runtime in C. Resolve them so the persona and
         # the provider can reason about names.
+        self._last_date = request.game_date
         builder = self._builder_for(request.session.character)
         request = request.with_resolved_keys(builder.key_for_ref)
 
@@ -206,7 +241,8 @@ class Sidecar:
         )
 
         recalled = self._memory.recall(
-            request.session.character, request.game_date
+            request.session.save_id, request.session.character,
+            request.game_date,
         )
         prompt = builder.render(
             permitted_keys=permitted,
@@ -228,11 +264,16 @@ class Sidecar:
         validator = ResponseValidator(request)
         response = validator.validate(raw)
 
+        # The turn is kept so the whole meeting can be summarised when it
+        # ends. `remember` is what the character thought mattered, and goes in
+        # as a hint rather than as a memory of its own - a note written before
+        # anyone knew where the conversation was going is a fragment, not a
+        # recollection.
+        encounter = self._current(request.session.save_id,
+                request.session.character)
+        encounter.add(request.player_input, response.spoken_text)
         if response.remember:
-            self._memory.remember(
-                request.session.character, request.game_date,
-                response.remember,
-            )
+            encounter.note(response.remember)
 
         for note in validator.rejections:
             self._warn(f"request {request.id}: {note}")

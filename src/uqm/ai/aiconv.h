@@ -179,4 +179,14 @@ const char *AiConv_CapturedText (void);
 
 void AiConv_ClearCaptured (void);
 
+/* Tells the sidecar the player has left this conversation.
+ *
+ * A notification, not a request: nothing is read back. Summarising a finished
+ * meeting costs a model call, and paying it here would freeze the screen while
+ * the player walks away. The sidecar does the work on its own thread and the
+ * game never waits.
+ *
+ * Safe to call when the AI is inactive or no conversation was in progress. */
+void AiConv_EndEncounter (void);
+
 #endif /* UQM_AI_AICONV_H */

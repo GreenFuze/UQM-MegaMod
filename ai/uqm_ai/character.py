@@ -24,7 +24,7 @@ from .precond import Node, PreconditionError, parse
 
 _FILE_KEYS = frozenset({
     "dialogue", "name", "species", "persona", "visits_flag", "voice_clip",
-    "aliases", "knowledge", "lore", "denial",
+    "aliases", "knowledge", "lore", "denial", "reply_length", "register",
 })
 _KNOWLEDGE_KEYS = frozenset({"id", "when", "phrases", "fact", "supersedes"})
 _LORE_KEYS = frozenset({"id", "when", "text", "source", "true_from", "true_until"})
@@ -93,6 +93,15 @@ class CharacterProfile:
     species: str
     description: str
     dialogue_res: str = ""
+    # How long a reply should be, in this character's own terms. A chat
+    # model left to itself writes an essay; a game character does not.
+    # Per character rather than global, because Fwiffo's verbosity is the
+    # joke and the Ur-Quan's brevity is the threat.
+    reply_length: str = "two to four sentences"
+    # When and how this character swears, in their own idiom. The game's
+    # own text already reaches for "damn" and "hell"; this makes that
+    # register available where the fiction earns it, and nowhere else.
+    register: str | None = None
     visits_flag: str | None = None
     voice_clip: str | None = None
     aliases: Mapping[int, str] = field(default_factory=dict)
@@ -228,6 +237,9 @@ def load_character(path: Path, known_flags: frozenset[str] | None = None) -> Cha
         species=raw["species"],
         description=raw["persona"],
         dialogue_res=raw["dialogue"],
+        reply_length=(raw.get("reply_length")
+                or "two to four sentences"),
+        register=raw.get("register") or None,
         visits_flag=raw.get("visits_flag") or None,
         voice_clip=raw.get("voice_clip") or None,
         aliases=aliases,

@@ -212,6 +212,31 @@ def _session_of(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class EncounterEnd:
+    """The player has left a conversation.
+
+    A notification, not a request: the game writes it and does not wait, so
+    summarising a finished encounter never delays the screen changing.
+    """
+
+    save_id: str
+    character: str
+    game_date: date = GAME_START
+
+    @classmethod
+    def from_json(cls, raw: dict[str, Any]) -> EncounterEnd:
+        session = _session_of(raw)
+        character = str(session.get("character", ""))
+        if not character:
+            raise ProtocolError("encounter_end names no character")
+        return cls(
+            save_id=str(session.get("save_id", "")) or "unknown",
+            character=character,
+            game_date=_date_of(raw),
+        )
+
+
+@dataclass(frozen=True)
 class ConverseRequest:
     """One conversational turn, as sent by the game."""
 

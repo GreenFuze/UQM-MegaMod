@@ -332,3 +332,6 @@ __pycache__/
 # Speech synthesis lives in its own environment: a specific torch build plus
 # a model, several gigabytes, installed per machine and never committed.
 ai/.venv/
+
+# Per-save conversation memory, written at runtime.
+ai/data/

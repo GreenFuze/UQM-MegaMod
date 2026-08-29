@@ -32,6 +32,7 @@
 #include "gameev.h"
 #include "libs/tasklib.h"
 #include "libs/log.h"
+#include "ai/aistate.h"
 #include "libs/misc.h"
 #include "master.h"
 
@@ -795,6 +796,11 @@ LoadCoreGame (COUNT which_game, SUMMARY_DESC* SummPtr)
 BOOLEAN
 LoadGame (COUNT which_game, SUMMARY_DESC *SummPtr, uio_Stream *in_fp, BOOLEAN try_core)
 {
+	/* The game keeps no global naming the current save, and the AI
+	 * layer needs one: memory keyed on anything less would be shared
+	 * between unrelated playthroughs. */
+	AiState_NoteSaveSlot ((int)which_game);
+
 	char file[PATH_MAX];
 	SUMMARY_DESC loc_sd;
 	COUNT num_links;

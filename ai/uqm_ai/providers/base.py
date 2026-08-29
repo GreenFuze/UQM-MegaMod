@@ -44,6 +44,16 @@ class LLMProvider(ABC):
         speaking the authored text verbatim, which is always correct.
         """
 
+    def summarise(self, system_prompt: str, transcript: str) -> str:
+        """Condense a finished conversation into one line to remember.
+
+        Not abstract: it runs off the critical path, after the player has
+        walked away, so a provider that cannot do it returns nothing and the
+        encounter is simply not remembered.
+        """
+        del system_prompt, transcript
+        return ""
+
 
 class TTSProvider(ABC):
     """Synthesises speech for generated prose."""

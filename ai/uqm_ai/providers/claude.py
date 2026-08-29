@@ -97,6 +97,19 @@ class ClaudeProvider(LLMProvider):
         return response
 
 
+    def summarise(self, system_prompt: str, transcript: str) -> str:
+        """One line to remember a finished conversation by.
+
+        Runs on a background thread after the player has left, so a failure
+        here loses a memory and nothing else - it never reaches a turn.
+        """
+        try:
+            raw = anyio.run(self._complete, system_prompt, transcript)
+        except Exception as exc:  # noqa: BLE001 - never fatal
+            raise ProviderError(self._describe(exc, self._last_result)) from exc
+
+        return (raw or "").strip()
+
     def narrate(self, request: NarrateRequest, system_prompt: str) -> str:
         prompt = self._build_narrate_prompt(request)
 

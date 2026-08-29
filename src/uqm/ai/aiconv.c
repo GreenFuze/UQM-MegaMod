@@ -446,7 +446,18 @@ beginRequest (AiJsonWriter *w, char *buf, size_t cap, const char *type,
 		int day = 0, month = 0, year = 0;
 		char date[16];
 
-		AiJson_WriteString (w, "session_save_id", "slot0");
+		{	/* Memory is keyed on this. A game that has never been saved or
+			 * loaded has no slot, and gets one that cannot collide with a
+			 * real one. */
+			int slot = AiState_SaveSlot ();
+			char saveId[24];
+
+			if (slot >= 0)
+				snprintf (saveId, sizeof saveId, "slot%d", slot);
+			else
+				strcpy (saveId, "unsaved");
+			AiJson_WriteString (w, "session_save_id", saveId);
+		}
 		AiJson_WriteString (w, "session_character",
 				character != NULL ? character : "");
 		AiJson_WriteString (w, "session_encounter",
@@ -536,6 +547,24 @@ writeSpokenRefs (AiJsonWriter *w)
 		AiJson_WriteInt (w, NULL, aiSpoken[i]);
 	}
 	AiJson_EndArray (w);
+}
+
+void
+AiConv_EndEncounter (void)
+{
+	char line[AI_LINE_MAX];
+	AiJsonWriter w;
+	const char *character = AiState_CharacterId ();
+
+	if (!aiActive || character == NULL || character[0] == '\0')
+		return;
+
+	beginRequest (&w, line, sizeof line, "encounter_end", 0, "");
+	AiJson_EndObject (&w);
+
+	if (!AiJson_WriterOk (&w) || !sendLine (line))
+		log_add (log_Warning, "AI: could not tell the sidecar the "
+				"conversation ended; it will not be remembered");
 }
 
 /* Builds the request separately, so a serialisation overflow is caught

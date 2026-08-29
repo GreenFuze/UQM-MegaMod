@@ -119,6 +119,12 @@ class MockProvider(LLMProvider):
             remember=remember,
         )
 
+    def summarise(self, system_prompt: str, transcript: str) -> str:
+        # Deterministic, so a test can assert what was remembered.
+        del system_prompt
+        exchanges = transcript.count("Captain: ")
+        return f"The captain spoke with them {exchanges} times."
+
     def narrate(self, request: NarrateRequest, system_prompt: str) -> str:
         """Return the authored answer unchanged.
 

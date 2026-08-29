@@ -19,6 +19,7 @@
 #include <assert.h>
 
 #include "save.h"
+#include "ai/aistate.h"
 
 #include "build.h"
 #include "controls.h"
@@ -1535,6 +1536,11 @@ SaveGroups (uio_Stream *fh)
 BOOLEAN
 SaveGame (COUNT which_game, SUMMARY_DESC *SummPtr, const char *name)
 {
+	/* The game keeps no global naming the current save, and the AI
+	 * layer needs one: memory keyed on anything less would be shared
+	 * between unrelated playthroughs. */
+	AiState_NoteSaveSlot ((int)which_game);
+
 	uio_Stream *out_fp;
 	POINT pt;
 	STAR_DESC SD;

@@ -74,6 +74,20 @@ collectDerived (AI_STATE_ENTRY *out, int cap, int count)
 	return count;
 }
 
+static int aiSaveSlot = -1;
+
+void
+AiState_NoteSaveSlot (int slot)
+{
+	aiSaveSlot = slot;
+}
+
+int
+AiState_SaveSlot (void)
+{
+	return aiSaveSlot;
+}
+
 int
 AiState_Collect (AI_STATE_ENTRY *out, int cap)
 {

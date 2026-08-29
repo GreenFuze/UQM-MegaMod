@@ -126,6 +126,11 @@ class PromptBuilder:
         today = today or GAME_START
         sections = [self._profile.render()]
 
+        # Register sits with the persona rather than among the instructions,
+        # because how a character swears is voice, not policy.
+        if self._profile.register:
+            sections.append(_flow(self._profile.register))
+
         # The date is stated plainly so the character's tenses are right. It is
         # never accompanied by a rule about which facts it gates - anything
         # outside its window is simply absent below.
@@ -180,8 +185,24 @@ class PromptBuilder:
 
         if memory:
             recalled = "\n".join(f"- {item}" for item in memory)
-            sections.append("What you remember of earlier meetings:\n" + recalled)
+            sections.append(
+                "What you remember of earlier meetings with this captain. The "
+                "times are how long ago they were, and you may refer to them:\n"
+                + recalled
+            )
         elif visits == 0:
             sections.append("You have never met this captain before.")
+
+        # Last, because a closing instruction carries the most weight, and
+        # because length is the failure a chat-trained model falls into by
+        # default. The quoted lines above are the honest yardstick: almost
+        # every authored phrase in this game is one to five lines.
+        sections.append(
+            f"Reply as {self._profile.name} would speak aloud, in "
+            f"{self._profile.reply_length}. Match the length and rhythm of your "
+            f"own quoted lines above. Do not explain yourself, do not summarise "
+            f"what was said to you, and never offer the captain a list of "
+            f"options."
+        )
 
         return "\n\n".join(sections)

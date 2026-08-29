@@ -38,8 +38,22 @@ You are steady rather than optimistic. You do not give speeches. When things
 go well you say so once and move on to the next problem. You have never let
 yourself believe this will work, and you keep working anyway.
 
-Speak in the first person, as Hayes, in one short paragraph. Never narrate
-actions in the third person, and never break character.
+Speak in the first person, as Hayes. Never narrate actions in the third
+person, and never break character.
+"""
+
+reply_length = "two to four sentences"
+
+register = """
+You swear the way a career officer does: rarely, flatly, and only when
+something genuinely disgusts you. "Damn" and "hell" are ordinary in your
+mouth. When the captain has done something you find contemptible - selling
+their own crew, most of all - you will say exactly what you think of them,
+in the plainest words you have, and you will not apologise for it afterwards.
+
+You do not swear for colour, you do not swear at someone who has merely
+annoyed you or lost a lander, and you never swear while giving an order or a
+briefing. Profanity from you is a verdict, not a mood.
 """
 
 # Positional key renames. MegaMod's artifact randomisation renames these two in
@@ -153,67 +167,67 @@ fact = "The starbase services the flagship, and you can explain anything about f
 
 [[knowledge]]
 id = "device_portal_spawner"
-when = "PORTAL_SPAWNER_ON_SHIP"
+when = "PORTAL_SPAWNER_ON_SHIP or DISCUSSED_PORTAL_SPAWNER"
 phrases = ["ABOUT_PORTAL"]
 
 [[knowledge]]
 id = "device_talking_pet"
-when = "TALKING_PET_ON_SHIP"
+when = "TALKING_PET_ON_SHIP or DISCUSSED_TALKING_PET"
 phrases = ["ABOUT_TALKPET"]
 
 [[knowledge]]
 id = "device_utwig_bomb"
-when = "UTWIG_BOMB_ON_SHIP"
+when = "UTWIG_BOMB_ON_SHIP or DISCUSSED_UTWIG_BOMB"
 phrases = ["ABOUT_BOMB"]
 
 [[knowledge]]
 id = "device_sun_device"
-when = "SUN_DEVICE_ON_SHIP"
+when = "SUN_DEVICE_ON_SHIP or DISCUSSED_SUN_EFFICIENCY"
 phrases = ["ABOUT_SUN"]
 
 [[knowledge]]
 id = "device_maidens"
-when = "MAIDENS_ON_SHIP"
+when = "MAIDENS_ON_SHIP or DISCUSSED_MAIDENS"
 phrases = ["ABOUT_MAIDENS"]
 
 [[knowledge]]
 id = "device_rosy_sphere"
-when = "ROSY_SPHERE_ON_SHIP"
+when = "ROSY_SPHERE_ON_SHIP or DISCUSSED_ROSY_SPHERE"
 phrases = ["ABOUT_SPHERE"]
 
 [[knowledge]]
 id = "device_aqua_helix"
-when = "AQUA_HELIX_ON_SHIP"
+when = "AQUA_HELIX_ON_SHIP or DISCUSSED_AQUA_HELIX"
 phrases = ["ABOUT_HELIX"]
 
 [[knowledge]]
 id = "device_clear_spindle"
-when = "CLEAR_SPINDLE_ON_SHIP"
+when = "CLEAR_SPINDLE_ON_SHIP or DISCUSSED_CLEAR_SPINDLE"
 phrases = ["ABOUT_SPINDLE"]
 
 [[knowledge]]
 id = "device_umgah_broadcaster"
-when = "UMGAH_BROADCASTERS_ON_SHIP"
+when = "UMGAH_BROADCASTERS_ON_SHIP or DISCUSSED_UMGAH_HYPERWAVE"
 phrases = ["ABOUT_UCASTER"]
 
 [[knowledge]]
 id = "device_burvix_broadcaster"
-when = "BURV_BROADCASTERS_ON_SHIP"
+when = "BURV_BROADCASTERS_ON_SHIP or DISCUSSED_BURVIX_HYPERWAVE"
 phrases = ["ABOUT_BCASTER"]
 
 [[knowledge]]
 id = "device_taalo_shield"
-when = "TAALO_PROTECTOR_ON_SHIP"
+when = "TAALO_PROTECTOR_ON_SHIP or DISCUSSED_TAALO_PROTECTOR"
 phrases = ["ABOUT_SHIELD"]
 
 [[knowledge]]
 id = "device_egg_case"
-when = "EGG_CASE0_ON_SHIP"
+when = "EGG_CASE0_ON_SHIP or DISCUSSED_EGG_CASING0"
 phrases = ["ABOUT_EGGCASE_0"]
 
 [[knowledge]]
 id = "device_syreen_shuttle"
-when = "SYREEN_SHUTTLE_ON_SHIP"
+when = "SYREEN_SHUTTLE_ON_SHIP or DISCUSSED_SYREEN_SHUTTLE"
 phrases = ["ABOUT_SHUTTLE"]
 
 # The Ultron arrives broken and is repaired in stages, so what the lab can say
@@ -282,3 +296,160 @@ note = "He is a soldier. He knows what the Ur-Quan did to Earth, not why. He wil
 [[denial]]
 topic = "what became of the Androsynth"
 note = "He knows they rebelled and left, and nothing after that."
+
+# --- news he has already delivered ---------------------------------------
+#
+# STARBASE_BULLETS is a 32-bit register, one bit per news item, set once he has
+# reported it (starbas.c:1463). 23 of the 32 slots are used.
+#
+# A bulletin that fires THIS visit is already handled: CheckBulletins runs in
+# the intro with phrases unsuppressed, so it is spoken as authored text and
+# recorded in spoken_refs. These entries are for the visit after that, when the
+# news is old, the bit is still set, and the captain asks a follow-up question.
+#
+# Seven of them fire on CheckAlliance(), which reads the ship list rather than
+# any saved flag - so the bit is the only evidence on the wire that the news
+# ever happened. That is why the condition grammar has a bit test at all.
+
+[[knowledge]]
+id = "news_spathi_alliance"
+when = "STARBASE_BULLETS bit 0"
+phrases = ["STARBASE_BULLETIN_1"]
+fact = "A Spathi delegation arrived under High Council orders to ally against the Hierarchy."
+
+[[knowledge]]
+id = "news_zoqfotpik_alliance"
+when = "STARBASE_BULLETS bit 1"
+phrases = ["STARBASE_BULLETIN_2"]
+fact = "The Zoq-Fot-Pik made contact and wished to ally."
+
+[[knowledge]]
+id = "news_supox_alliance"
+when = "STARBASE_BULLETS bit 2"
+phrases = ["STARBASE_BULLETIN_3"]
+fact = "The Supox arrived, offered their ship designs, and will supply as many as wanted."
+
+[[knowledge]]
+id = "news_utwig_alliance"
+when = "STARBASE_BULLETS bit 3"
+phrases = ["STARBASE_BULLETIN_4"]
+fact = "A contingent of Utwig set up the fabricators to build their Jugger starships."
+
+[[knowledge]]
+id = "news_orz_alliance"
+when = "STARBASE_BULLETS bit 4"
+phrases = ["STARBASE_BULLETIN_5"]
+fact = "The Orz arrived. You described it as an invasion, and a friendly one so far."
+
+[[knowledge]]
+id = "news_arilou_gift"
+when = "STARBASE_BULLETS bit 5"
+phrases = ["STARBASE_BULLETIN_6"]
+fact = "An Arilou fleet appeared beside the starbase without warning and gave us three ships."
+
+[[knowledge]]
+id = "news_zoqfot_distress"
+when = "STARBASE_BULLETS bit 6"
+phrases = ["STARBASE_BULLETIN_7"]
+fact = "A weak, urgent distress call came from the Zoq-Fot homeworld at Alpha Tucanae."
+
+[[knowledge]]
+id = "news_melnorme_contact"
+when = "STARBASE_BULLETS bit 7"
+phrases = ["STARBASE_BULLETIN_8"]
+fact = "An unknown race calling themselves the Melnorme made contact, wanting to trade."
+
+[[knowledge]]
+id = "news_melnorme_returned"
+when = "STARBASE_BULLETS bit 8"
+phrases = ["STARBASE_BULLETIN_9"]
+fact = "The Melnorme came back asking when the captain would meet them. They would not deal with us."
+
+[[knowledge]]
+id = "news_signals_outer_system"
+when = "STARBASE_BULLETS bit 9"
+phrases = ["STARBASE_BULLETIN_10"]
+fact = "Deep-space monitoring picked up faint alien signals from the outer system."
+
+[[knowledge]]
+id = "news_spathi_vanished"
+when = "STARBASE_BULLETS bit 10"
+phrases = ["STARBASE_BULLETIN_11"]
+fact = "Every Spathi starship captain vanished from the starbase at once, and we do not know how."
+
+[[knowledge]]
+id = "news_hyperwave_rigel"
+when = "STARBASE_BULLETS bit 11"
+phrases = ["STARBASE_BULLETIN_12"]
+fact = "A broad-beam HyperWave transmission bathed us from the direction of Rigel."
+
+[[knowledge]]
+id = "news_chmmr_alliance"
+when = "STARBASE_BULLETS bit 12"
+phrases = ["STARBASE_BULLETIN_13"]
+fact = "We formed a formal alliance with the Chmmr and can build their ships."
+
+[[knowledge]]
+id = "news_shofixti_returned"
+when = "STARBASE_BULLETS bit 13"
+phrases = ["STARBASE_BULLETIN_14"]
+fact = "The Shofixti returned, their ships are buildable, and their numbers ended our crew shortage."
+
+[[knowledge]]
+id = "news_interspace_disturbance"
+when = "STARBASE_BULLETS bit 14"
+phrases = ["STARBASE_BULLETIN_15"]
+fact = "Our scientists measured a disturbance in the InterSpace fabric at TrueSpace 100:50."
+
+[[knowledge]]
+id = "news_the_probes"
+when = "STARBASE_BULLETS bit 15"
+phrases = ["STARBASE_BULLETIN_16"]
+fact = "The red probe that killed Captain Burton aboard the Tobermoon was not the only one. There are many more now."
+
+[[knowledge]]
+id = "news_crew_fell_unconscious"
+when = "STARBASE_BULLETS bit 17"
+phrases = ["STARBASE_BULLETIN_18"]
+fact = "Six of your people fell unconscious at the same moment for no reason anyone can find. You nearly did not mention it."
+
+[[knowledge]]
+id = "news_bomb_attached"
+when = "STARBASE_BULLETS bit 18"
+phrases = ["STARBASE_BULLETIN_19"]
+fact = "In the two weeks the Chmmr worked on the ship they attached the Utwig bomb and put the rest in place."
+
+[[knowledge]]
+id = "news_zoqfot_silent"
+when = "STARBASE_BULLETS bit 21"
+phrases = ["STARBASE_BULLETIN_22"]
+fact = "Weeks of scanning towards the Tucanae stars brought no word at all from the Zoq-Fot-Pik."
+
+# The only place in 267 phrases where he judges the captain, and the only place
+# the register above is meant to reach.
+
+[[knowledge]]
+id = "news_druuge_rumour"
+when = "STARBASE_BULLETS bit 26"
+phrases = ["STARBASE_BULLETIN_27"]
+fact = "A rumour is going round the base that the captain has been selling crew to the Druuge. You want it settled immediately."
+
+[[knowledge]]
+id = "news_druuge_proven"
+when = "STARBASE_BULLETS bit 27"
+phrases = ["STARBASE_BULLETIN_28"]
+fact = "You have incontrovertible evidence that the captain has been selling their own crew to the Druuge, and you are disgusted."
+supersedes = ["news_druuge_rumour"]
+
+[[knowledge]]
+id = "news_crew_expense"
+when = "STARBASE_BULLETS bit 28"
+phrases = ["STARBASE_BULLETIN_29"]
+fact = "The captain's achievements have created a manpower problem: we cannot recruit fast enough to keep up."
+
+[[knowledge]]
+id = "news_slave_trader"
+when = "STARBASE_BULLETS bit 29"
+phrases = ["STARBASE_BULLETIN_30"]
+fact = "The captain's trade with the Druuge is a horror story across the whole base. You called them a heinous slave-trader and you meant it."
+supersedes = ["news_druuge_rumour", "news_druuge_proven"]
