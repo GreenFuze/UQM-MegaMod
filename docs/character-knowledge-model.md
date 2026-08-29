@@ -268,3 +268,57 @@ this before suspecting the model.
 The discipline that makes this work: **read the log before theorising.** Every
 confidently-asserted diagnosis in this project that was not measured turned out
 to be wrong.
+
+---
+
+## 7. Memory, and why it is smaller than it looks
+
+A character remembering earlier meetings is in
+[ai-architecture.md](ai-architecture.md) §5 as per-character, per-save and
+summarised. What ships is per-character, **per session**, and summarised. The
+missing word is deliberate.
+
+The obvious implementation — a file per save under `ai/data` — is not safe:
+
+- The game has no global naming the current save slot. `SaveGame`/`LoadGame`
+  take `which_game` but nothing retains it, so every playthrough would share
+  one store.
+- Worse, loading a save from before a revelation leaves the side-file still
+  holding it. The character then remembers a conversation that did not happen
+  in that timeline, and spoils the plot to prove it. There is no fix short of
+  writing into the save format.
+
+So memory lives in the sidecar process and is guarded by the one monotonic
+thing the game already sends — the in-game date:
+
+> If the incoming date is **earlier** than the newest thing remembered, the
+> player has loaded an earlier save. Everything after the new date is dropped,
+> not hidden.
+
+That is correct within a session including across a load, and correct across
+sessions by construction, because nothing carries over. What is lost is a
+character remembering you between launches. Getting that requires a real save
+identity first — a small change to `save.c`/`load.c` to retain `which_game` —
+and it is not worth being wrong about in the meantime.
+
+## 8. Disposition: mostly already delivered
+
+Persistent fear and trust, so that persuasion accumulates, was asked for
+separately. Most of it arrived with the state wire rather than as a new
+mechanism, and that is the better outcome:
+
+- **The game already keeps relationship dials.** Six `*_MANNER` flags —
+  `ARILOU`, `DRUUGE`, `ORZ`, `PKUNK`, `SPATHI`, `THRADD` — are each the first
+  branch of their race's `Intro`, typically 0 unmet / 1 hostile but salvageable
+  / 2 hostile forever / 3 friendly. They are written in `post_*_enc` on the way
+  out, and they now reach the prompt like any other flag.
+- **`*_VISITS` counters** (48 of them) already say how well the character knows
+  the captain, and crossing a relationship tier deliberately resets them
+  (`pkunkc.c:1088`), so "what has been said" is scoped to the current
+  relationship rather than being monotonic.
+
+An AI-side fear/trust scalar on top of this would have no signal driving it
+that is not already in game state, and would be able to contradict the game's
+own dial — a character reading as warm while `PKUNK_MANNER` says permanently
+hostile. The remaining gap is *within*-conversation: persuasion accumulating
+over several turns of one hail. That belongs with memory, not beside it.

@@ -12,6 +12,7 @@ from typing import IO
 
 from . import gamelog
 from .cast import Cast, CastError
+from .memory import MemoryStore
 from .pagination import paginate
 from .persona import PromptBuilder
 from .voice import VoiceDirectory
@@ -57,6 +58,9 @@ class Sidecar:
         self._out = stdout if stdout is not None else sys.stdout
         self._log = log if log is not None else sys.stderr
         self._voice = VoiceDirectory() if tts is not None else None
+        # Session-scoped and guarded by the in-game date; see memory.py
+        # for why it is not a file.
+        self._memory = MemoryStore()
 
     def run(self) -> None:
         """Serve until stdin closes."""
@@ -201,9 +205,12 @@ class Sidecar:
             dict.fromkeys(request.available_knowledge + spoken + unlocked)
         )
 
+        recalled = self._memory.recall(
+            request.session.character, request.game_date
+        )
         prompt = builder.render(
             permitted_keys=permitted,
-            memory=request.memory,
+            memory=request.memory or recalled,
             visits=request.visits,
             state=request.state,
             today=request.game_date,
@@ -220,6 +227,12 @@ class Sidecar:
         raw = self._llm.generate(request, prompt)
         validator = ResponseValidator(request)
         response = validator.validate(raw)
+
+        if response.remember:
+            self._memory.remember(
+                request.session.character, request.game_date,
+                response.remember,
+            )
 
         for note in validator.rejections:
             self._warn(f"request {request.id}: {note}")

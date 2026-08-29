@@ -360,3 +360,58 @@ class TestTemplateReduction:
         # meaning-only and their specifics must not be quoted as fact.
         table = cast.table("comm.starbase.dialogue")
         assert any(e.has_interpolation for e in table.entries)
+
+
+class TestMemory:
+    """Recall must survive a conversation and not survive a reload.
+
+    The hazard this guards is specific: a player loads a save from before a
+    revelation, and the character remembers a conversation that has not
+    happened in that timeline and spoils the plot to prove it.
+    """
+
+    def test_recall_is_per_character(self) -> None:
+        from uqm_ai.memory import MemoryStore
+
+        store = MemoryStore()
+        store.remember("comm.spathi.dialogue", date(2155, 3, 1), "He panicked.")
+        assert store.recall("comm.spathi.dialogue", date(2155, 6, 1))
+        assert not store.recall("comm.urquan.dialogue", date(2155, 6, 1))
+
+    def test_loading_an_earlier_save_drops_the_future(self) -> None:
+        from uqm_ai.memory import MemoryStore
+
+        store = MemoryStore()
+        store.remember("x", date(2155, 3, 1), "early")
+        store.remember("x", date(2157, 3, 1), "late")
+        assert store.recall("x", date(2157, 6, 1)) == ("early", "late")
+
+        # The player reloads a save from 2156. The 2157 meeting did not happen.
+        assert store.recall("x", date(2156, 1, 1)) == ("early",)
+        # and it is gone, not merely hidden
+        assert store.recall("x", date(2157, 6, 1)) == ("early",)
+
+    def test_the_same_beat_is_not_remembered_twice(self) -> None:
+        from uqm_ai.memory import MemoryStore
+
+        store = MemoryStore()
+        for _ in range(3):
+            store.remember("x", date(2155, 3, 1), "He panicked.")
+        assert len(store) == 1
+
+    def test_recall_is_bounded(self) -> None:
+        from uqm_ai.memory import MemoryStore
+
+        store = MemoryStore(limit=3)
+        for day in range(1, 9):
+            store.remember("x", date(2155, 3, day), f"meeting {day}")
+        recalled = store.recall("x", date(2156, 1, 1))
+        assert len(recalled) == 3
+        assert recalled[-1] == "meeting 8"      # oldest dropped, newest kept
+
+    def test_empty_text_is_not_a_memory(self) -> None:
+        from uqm_ai.memory import MemoryStore
+
+        store = MemoryStore()
+        store.remember("x", date(2155, 3, 1), "   ")
+        assert len(store) == 0
