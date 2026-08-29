@@ -89,9 +89,18 @@ class Sidecar:
                 self._send(self._hello_reply())
                 return
             if kind == "encounter_end":
-                # A notification, not a request. The game does not wait, so
-                # there is nothing to reply to.
-                self._end_encounter(EncounterEnd.from_json(payload))
+                # A notification, not a request, and NOTHING may be written
+                # back - not even an error. The game does not read after
+                # sending this, so a reply would stay in the pipe and be
+                # consumed as the answer to the NEXT request, putting every
+                # turn after it one message out of step.
+                #
+                # A log line is safe and is the only thing allowed here:
+                # readMessage drains those (aiconv.c:390) and keeps reading.
+                try:
+                    self._end_encounter(EncounterEnd.from_json(payload))
+                except Exception as exc:  # noqa: BLE001 - must not reply
+                    self._warn(f"encounter_end ignored: {exc}")
                 return
             if kind == "narrate":
                 self._send(self._narrate(NarrateRequest.from_json(payload)))

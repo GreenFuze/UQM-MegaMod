@@ -611,3 +611,94 @@ class TestDeviceMemory:
     def test_he_cannot_analyse_what_he_never_saw(self, cast: Cast) -> None:
         keys = cast.builder(STARBASE).unlocked_keys({}, TODAY)
         assert "ABOUT_SHIELD" not in keys
+
+
+class TestNotificationNeverReplies:
+    """encounter_end must put NOTHING on the wire that the game will read.
+
+    The game writes it and does not read afterwards. Any reply - including an
+    error - stays in the pipe and is consumed as the answer to the NEXT
+    request, putting every turn after it one message out of step. A log line
+    is the exception: readMessage drains those (aiconv.c:390) and keeps going.
+    """
+
+    @staticmethod
+    def _run(cast: Cast, lines: list[str]) -> list[dict]:
+        import io
+        import json as _json
+
+        from uqm_ai.providers.mock import MockProvider
+        from uqm_ai.sidecar import Sidecar
+
+        out = io.StringIO()
+        Sidecar(
+            cast, MockProvider(),
+            stdin=io.StringIO("\n".join(lines) + "\n"),
+            stdout=out, log=io.StringIO(),
+        ).run()
+        return [_json.loads(line) for line in out.getvalue().splitlines()]
+
+    def test_a_well_formed_notification_is_silent(self, cast: Cast) -> None:
+        replies = self._run(cast, [
+            '{"type":"encounter_end","session_character":"comm.spathi.dialogue"}'
+        ])
+        assert [r for r in replies if r.get("type") != "log"] == []
+
+    def test_a_malformed_notification_is_also_silent(self, cast: Cast) -> None:
+        # No character named. This used to raise ProtocolError, fall into the
+        # generic handler, and emit an error nobody would ever read.
+        replies = self._run(cast, ['{"type":"encounter_end"}'])
+        assert [r for r in replies if r.get("type") != "log"] == []
+
+    def test_the_next_request_still_lines_up(self, cast: Cast) -> None:
+        # The regression that matters: a bad notification followed by a real
+        # turn must produce exactly one non-log reply, and it must answer the
+        # turn.
+        import json as _json
+
+        turn = {
+            "type": "converse", "id": 77,
+            "session_character": "comm.spathi.dialogue",
+            "player_input": "hello",
+            "actions": [{"ref": 1, "text": "hi", "terminal": False}],
+        }
+        replies = self._run(cast, [
+            '{"type":"encounter_end"}', _json.dumps(turn)
+        ])
+        answers = [r for r in replies if r.get("type") != "log"]
+        assert len(answers) == 1
+        assert answers[0]["id"] == 77
+
+
+class TestMemoryIsThreadSafe:
+    """The recap thread files a summary while a live turn may be recalling."""
+
+    def test_concurrent_writes_and_reads_do_not_fault(self, tmp_path: Path) -> None:
+        import threading
+
+        from uqm_ai.memory import MemoryStore
+
+        store = MemoryStore(tmp_path / "memory")
+        errors: list[BaseException] = []
+
+        def writer() -> None:
+            try:
+                for n in range(200):
+                    store.remember("slot0", "x", date(2155, 3, 1), f"note {n}")
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        def reader() -> None:
+            try:
+                for _ in range(200):
+                    store.recall("slot0", "x", date(2155, 6, 1))
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer), threading.Thread(target=reader)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=20)
+
+        assert not errors, errors

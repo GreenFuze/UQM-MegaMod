@@ -31,6 +31,7 @@ Two rules from the architecture hold absolutely:
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -80,6 +81,11 @@ class MemoryStore:
     ) -> None:
         self._root = Path(root) if root else None
         self._limit = limit
+        # The recap thread files a summary after the player has walked away,
+        # which can land while a live turn is recalling. Both sides mutate the
+        # entry lists and rewrite the file, and a list mutated mid-iteration
+        # would surface as a failed turn rather than a lost memory.
+        self._guard = threading.RLock()
         # save id -> character -> entries
         self._saves: dict[str, dict[str, list[Recollection]]] = {}
         self._loaded: set[str] = set()
@@ -93,6 +99,10 @@ class MemoryStore:
         if not text:
             return
 
+        with self._guard:
+            self._remember(save_id, character, when, text)
+
+    def _remember(self, save_id, character, when, text) -> None:
         entries = self._entries(save_id, character)
         if any(e.text == text for e in entries):
             return          # the same beat twice is not a second memory
@@ -110,10 +120,13 @@ class MemoryStore:
         Anything dated after `now` is discarded rather than hidden: the player
         has loaded an earlier save, and that future did not happen.
         """
-        entries = self._entries(save_id, character)
-        if not entries:
-            return ()
+        with self._guard:
+            entries = self._entries(save_id, character)
+            if not entries:
+                return ()
+            return self._prune(save_id, character, entries, now)
 
+    def _prune(self, save_id, character, entries, now) -> tuple[str, ...]:
         kept = [e for e in entries if e.when <= now]
         if len(kept) != len(entries):
             self._saves[save_id][character] = kept
@@ -121,13 +134,18 @@ class MemoryStore:
         return tuple(e.render(now) for e in kept)
 
     def forget(self, save_id: str, character: str) -> None:
+        with self._guard:
+            self._forget(save_id, character)
+
+    def _forget(self, save_id: str, character: str) -> None:
         self._saves.get(save_id, {}).pop(character, None)
         self._persist(save_id)
 
     def __len__(self) -> int:
-        return sum(
-            len(v) for save in self._saves.values() for v in save.values()
-        )
+        with self._guard:
+            return sum(
+                len(v) for save in self._saves.values() for v in save.values()
+            )
 
     # --- storage ---------------------------------------------------------
 
