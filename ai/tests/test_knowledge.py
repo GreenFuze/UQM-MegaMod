@@ -507,7 +507,20 @@ class TestVoice:
         builder = cast.builder(STARBASE)
         prompt = builder.render(permitted_keys=(), state={}, today=TODAY)
         assert builder.profile.reply_length in prompt
-        assert "never offer the captain a list of options" in prompt
+        assert "never offer them a list of options" in prompt
+
+    def test_narration_does_not_carry_the_converse_closing(self, cast: Cast) -> None:
+        # Narration rewords an outcome the encounter already applied, so a
+        # length cap and "do not restate" belong nowhere near it. With them, a
+        # whole briefing came back as "Human - say again?" and the content was
+        # simply gone.
+        builder = cast.builder(STARBASE)
+        prompt = builder.render(
+            permitted_keys=(), state={}, today=TODAY, narrating=True
+        )
+        assert builder.profile.reply_length not in prompt
+        assert "do not shorten it into a reaction" in prompt
+        assert "Keep every fact" in prompt
 
     def test_register_reaches_the_prompt(self, cast: Cast) -> None:
         builder = cast.builder(STARBASE)

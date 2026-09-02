@@ -217,7 +217,7 @@ class ClaudeProvider(LLMProvider):
                 "meaning, so a reply that says otherwise leaves the captain "
                 "believing something that did not happen.",
                 "",
-                "Add no new facts - no Spathi history, names or places that are "
+                "Add no new facts - no history, names or places that are "
                 "not above or already said by you.",
                 "",
                 "Reply with the spoken words only. No JSON, no quotation marks "
@@ -369,10 +369,10 @@ class ClaudeProvider(LLMProvider):
             "to refuse: set willing to true and react in character."
         )
         lines.append(
-            "Say only what you actually know. Do not invent Spathi history, "
+            "Say only what you actually know. Do not invent history, "
             "names, places or events that were not given to you above. If you "
             "do not know something, say so, change the subject, or lie in a "
-            "way that is obviously Fwiffo being evasive."
+            "way that is obviously you being evasive."
         )
         lines.append("")
         lines.append(_RESPONSE_FORMAT)

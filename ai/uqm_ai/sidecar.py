@@ -215,6 +215,7 @@ class Sidecar:
             visits=0,
             state=request.state,
             today=request.game_date,
+            narrating=True,
         )
 
         spoken = to_display_text(self._llm.narrate(request, prompt).strip())

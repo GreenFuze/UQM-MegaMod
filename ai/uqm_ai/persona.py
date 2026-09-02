@@ -121,6 +121,7 @@ class PromptBuilder:
         visits: int = 0,
         state: Mapping[str, int] | None = None,
         today: date | None = None,
+        narrating: bool = False,
     ) -> str:
         state = state or {}
         today = today or GAME_START
@@ -203,12 +204,29 @@ class PromptBuilder:
         # object, and a second "reply with..." here contradicted it - the model
         # split the difference, emitted JSON with prose around it, and the whole
         # blob reached the subtitle as the character's line.
-        sections.append(
-            f"Your spoken words are those of {self._profile.name} speaking "
-            f"aloud, and run to {self._profile.reply_length}. They match the "
-            f"length and rhythm of your own quoted lines above. You do not "
-            f"explain yourself, you do not summarise what was said to you, and "
-            f"you never offer the captain a list of options."
-        )
+        if narrating:
+            # Narration rewords an outcome the encounter has ALREADY applied,
+            # so the length is the authored line's, not the character's usual.
+            # The converse wording below cost us two turns in play: told not to
+            # summarise and to keep to a few sentences, the model answered a
+            # whole briefing with "Human - say again?" and the content was
+            # simply gone.
+            sections.append(
+                f"You are about to say the words the encounter has given you, "
+                f"in the voice of {self._profile.name}. Keep every fact and "
+                f"every commitment in them - that is what actually happened. "
+                f"Say all of it: reword and re-rhythm as much as you like, but "
+                f"do not shorten it into a reaction, and do not drop a point "
+                f"because it is long."
+            )
+        else:
+            sections.append(
+                f"Your spoken words are those of {self._profile.name} speaking "
+                f"aloud, and run to {self._profile.reply_length}. They match "
+                f"the length and rhythm of your own quoted lines above. You do "
+                f"not explain yourself, you do not restate the captain's own "
+                f"words back at them, and you never offer them a list of "
+                f"options."
+            )
 
         return "\n\n".join(sections)
