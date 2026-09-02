@@ -45,6 +45,60 @@ set willing to false, nothing happens and the moment is lost.
 """.strip()
 
 
+# Fields of the reply contract. Text carrying any of these is the model
+# trying to answer in JSON, however badly formed, and must never be spoken.
+_SCHEMA_KEYS = ('"matches_ref"', '"spoken_text"', '"willing"',
+                '"promises_action"', '"remember"')
+
+
+def _looks_like_json(text: str) -> bool:
+    stripped = text.lstrip()
+    return stripped.startswith(("{", "[")) or any(
+        key in text for key in _SCHEMA_KEYS
+    )
+
+
+def _salvage(text: str):
+    """Recover the reply object from output with prose wrapped around it.
+
+    The model is asked for a bare object and mostly obliges, but a preamble
+    or a trailing remark makes json.loads fail on the whole string. Scanning
+    for the first balanced {...} recovers the answer instead of discarding a
+    perfectly good reply - or worse, speaking it verbatim.
+    """
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == chr(92):
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        found = json.loads(text[start:index + 1])
+                    except json.JSONDecodeError:
+                        break
+                    if isinstance(found, dict):
+                        return found
+                    break
+        start = text.find("{", start + 1)
+    return None
+
+
 class ClaudeProvider(LLMProvider):
     """Single-turn completion through the Claude Agent SDK."""
 
@@ -124,6 +178,20 @@ class ClaudeProvider(LLMProvider):
 
         # No JSON here. There is no decision left to make, so asking for a
         # structured object would only add a way for the turn to fail.
+        #
+        # If one arrives anyway, salvage the spoken words from it and refuse
+        # the rest. The game speaks whatever this returns, and failing the
+        # call is recoverable - it falls back to the authored text, which is
+        # always a correct answer - while speaking a JSON blob is not.
+        if _looks_like_json(text):
+            salvaged = _salvage(text) or {}
+            spoken = str(salvaged.get("spoken_text", "")).strip()
+            if not spoken:
+                raise ProviderError(
+                    "claude answered narrate with JSON; refusing to speak it"
+                )
+            return spoken
+
         return text
 
     @staticmethod
@@ -327,9 +395,21 @@ class ClaudeProvider(LLMProvider):
             if not isinstance(payload, dict):
                 raise ValueError("not an object")
         except (json.JSONDecodeError, ValueError):
-            # Malformed output degrades to pure conversation rather than
-            # failing the turn: the player still gets a reply, and no state
-            # transition happens, which is the safe direction.
+            payload = _salvage(text)
+
+        if payload is None:
+            # Genuine prose. Degrading to pure conversation is the safe
+            # direction: the player still gets a reply and no state changes.
+            #
+            # But only if it really is prose. _salvage refuses anything that
+            # looks like the schema, because the game SPEAKS whatever arrives
+            # here (comm.c:1870), and a JSON blob delivered in a character's
+            # voice is the worst outcome available - worse than falling back
+            # to the menu, which at least still plays.
+            if _looks_like_json(text):
+                raise ProviderError(
+                    "claude returned unparseable JSON; refusing to speak it"
+                )
             return ConverseResponse(
                 id=request.id, spoken_text=text, action=None, remember=None
             ), False

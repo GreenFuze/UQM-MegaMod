@@ -197,12 +197,18 @@ class PromptBuilder:
         # because length is the failure a chat-trained model falls into by
         # default. The quoted lines above are the honest yardstick: almost
         # every authored phrase in this game is one to five lines.
+        #
+        # Phrased as a description of the SPOKEN WORDS rather than as an
+        # instruction about the reply. The converse request asks for a JSON
+        # object, and a second "reply with..." here contradicted it - the model
+        # split the difference, emitted JSON with prose around it, and the whole
+        # blob reached the subtitle as the character's line.
         sections.append(
-            f"Reply as {self._profile.name} would speak aloud, in "
-            f"{self._profile.reply_length}. Match the length and rhythm of your "
-            f"own quoted lines above. Do not explain yourself, do not summarise "
-            f"what was said to you, and never offer the captain a list of "
-            f"options."
+            f"Your spoken words are those of {self._profile.name} speaking "
+            f"aloud, and run to {self._profile.reply_length}. They match the "
+            f"length and rhythm of your own quoted lines above. You do not "
+            f"explain yourself, you do not summarise what was said to you, and "
+            f"you never offer the captain a list of options."
         )
 
         return "\n\n".join(sections)

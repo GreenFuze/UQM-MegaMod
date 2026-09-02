@@ -434,3 +434,75 @@ class TestSidecarResilience:
         replies = self._run(cast, MockProvider(), ['{"type":"launch_missiles","id":3}'])
         assert replies[0]["type"] == "error"
         assert replies[0]["id"] == 3
+
+
+class TestNeverSpeakJson:
+    """A JSON blob must never reach the subtitle in a character's voice.
+
+    The game SPEAKS whatever comes back (comm.c:1870 for a failed turn,
+    and the reply text otherwise). _parse used to fall back to "treat the raw
+    output as prose", which is right for prose and catastrophic for
+    almost-JSON: a preamble or a trailing comma made json.loads fail and the
+    whole object was delivered as the character's line.
+    """
+
+    @staticmethod
+    def _request():
+        return make_request("What should I do next?", ["join_us"])
+
+    def test_prose_is_still_accepted(self) -> None:
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        response, _ = ClaudeProvider._parse(
+            "Leave Pluto? Out there is where the monsters are!", self._request()
+        )
+        assert response.spoken_text.startswith("Leave Pluto?")
+        assert response.action is None
+
+    def test_json_with_a_preamble_is_salvaged(self) -> None:
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        raw = (
+            'Here is my reply:\n'
+            '{"matches_ref": null, "willing": false, "promises_action": false,'
+            ' "spoken_text": "No. I am staying here.", "remember": null}\n'
+            'Let me know if you need anything else.'
+        )
+        response, _ = ClaudeProvider._parse(raw, self._request())
+        assert response.spoken_text == "No. I am staying here."
+        assert "matches_ref" not in response.spoken_text
+
+    def test_unparseable_json_is_refused_rather_than_spoken(self) -> None:
+        from uqm_ai.providers.base import ProviderError
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        # Trailing comma: not valid JSON, and unmistakably not prose either.
+        raw = '{"spoken_text": "hello", "willing": true,}'
+        with pytest.raises(ProviderError):
+            ClaudeProvider._parse(raw, self._request())
+
+    def test_a_bare_object_still_parses(self) -> None:
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        raw = (
+            '{"matches_ref": null, "willing": false, "promises_action": false,'
+            ' "spoken_text": "Hello there.", "remember": null}'
+        )
+        response, _ = ClaudeProvider._parse(raw, self._request())
+        assert response.spoken_text == "Hello there."
+
+
+class TestPromptDoesNotFightTheContract:
+    """The system prompt must not issue a second, conflicting "reply with"."""
+
+    def test_no_competing_reply_instruction(self) -> None:
+        from uqm_ai.cast import Cast
+
+        cast = Cast(REPO, CONTENT)
+        prompt = cast.builder("comm.starbase.dialogue").render(permitted_keys=())
+
+        # The user prompt says "Reply with ONLY a JSON object". A second
+        # imperative here made the model split the difference and emit JSON
+        # wrapped in prose.
+        assert "Reply as" not in prompt
+        assert "Your spoken words are" in prompt
