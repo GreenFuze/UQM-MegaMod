@@ -895,6 +895,23 @@ typedef struct talking_state
 
 } TALKING_STATE;
 
+/* Set while a generated line is on screen.
+ *
+ * Subtitles are normally paced by the voice clip they hang on, which is right
+ * for authored dialogue because the clip IS the line. A generated line has no
+ * recording of itself, so it borrows one - and a four-sentence reply hung on a
+ * three-second clip goes past far faster than anyone can read.
+ *
+ * The game already has the pacing we want: with no speech it times each page
+ * from its length and the player's reading speed. This flag reaches that same
+ * branch for generated text while leaving every authored line exactly as it
+ * was. */
+static BOOLEAN aiTextPaced = FALSE;
+
+/* The last generated line, so it can be shown again on request. */
+static char aiLastSpoken[AI_MAX_TEXT] = "";
+static char aiLastClip[128] = "";
+
 static BOOLEAN
 DoTalkSegue (TALKING_STATE *pTS)
 {
@@ -908,7 +925,9 @@ DoTalkSegue (TALKING_STATE *pTS)
 		return FALSE;
 	}
 	
-	if (optSpeech || optSmoothScroll == OPT_3DO || (LOBYTE(GLOBAL(CurrentActivity)) == WON_LAST_BATTLE))
+	if (!aiTextPaced
+			&& (optSpeech || optSmoothScroll == OPT_3DO
+			|| (LOBYTE(GLOBAL(CurrentActivity)) == WON_LAST_BATTLE)))
 	{
 		if (PulsedInputState.menu[KEY_MENU_CANCEL])
 		{
@@ -1646,13 +1665,27 @@ AiSpeakGenerated (const char *text, const char *clip)
 {
 	UNICODE *track;
 
+	/* Kept so the line can be shown again. A generated line cannot be rewound
+	 * the way an authored one can: TalkSegue clears the subtitles when the
+	 * segue ends, so by the time the player asks to hear it again there is
+	 * nothing on the track to seek back through. */
+	strncpy (aiLastSpoken, text != NULL ? text : "", sizeof (aiLastSpoken) - 1);
+	aiLastSpoken[sizeof (aiLastSpoken) - 1] = '\0';
+	strncpy (aiLastClip, clip != NULL ? clip : "", sizeof (aiLastClip) - 1);
+	aiLastClip[sizeof (aiLastClip) - 1] = '\0';
+
 	if (clip != NULL && clip[0] != '\0')
-	{
+	{	/* Synthesised speech: the clip IS this line, so let it set the pace. */
 		log_add (log_Debug, "AI: speaking with generated clip %s", clip);
+		aiTextPaced = FALSE;
 		track = (UNICODE *)clip;
 	}
 	else
-	{
+	{	/* No recording of these words exists, so a clip is borrowed purely to
+		 * hang the subtitles on - SpliceTrack attaches text to decoded audio
+		 * and has no text-only path. Its LENGTH must not decide how long the
+		 * words stay up, so the line is paced by reading time instead. */
+		aiTextPaced = TRUE;
 		track = GetStringSoundClip (SetAbsStringTableIndex (
 				CommData.ConversationPhrases, 0));
 		if (track == NULL)
@@ -1921,6 +1954,18 @@ SelectReplay (ENCOUNTER_STATE *pES)
 	FadeMusic (BACKGROUND_VOL, ONE_SECOND);
 	if (pES)
 		FeedbackPlayerPhrase (pES->phrase_buf);
+
+	/* TalkSegue (0) rewinds the track that is still loaded, which is how the
+	 * response menu replays an authored line. A generated line is gone by
+	 * then - the segue clears its subtitles when it ends - so there is
+	 * nothing to rewind and the player sees nothing at all. Say it again
+	 * instead, which is what they asked for. */
+	if (AiConv_IsActive () && aiLastSpoken[0] != '\0')
+	{
+		AiSpeakGenerated (aiLastSpoken, aiLastClip);
+		AlienTalkSegue (WAIT_TRACK_ALL);
+		return;
+	}
 
 	TalkSegue (0);
 }
@@ -2411,6 +2456,12 @@ InitCommunication (CONVERSATION which_comm)
 	AiConv_ForgetSpoken ();
 	AiConv_ForgetDispatched ();
 	aiCurrentNode = NULL;
+
+	/* Or the next character's first replay would repeat the previous one's
+	 * last line, in the previous one's voice. */
+	aiLastSpoken[0] = '\0';
+	aiLastClip[0] = '\0';
+	aiTextPaced = FALSE;
 
 
 	if (LastActivity & CHECK_LOAD)
