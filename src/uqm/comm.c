@@ -910,11 +910,6 @@ typedef struct talking_state
  * was. */
 static BOOLEAN aiTextPaced = FALSE;
 
-/* Speech is muted while a borrowed carrier clip plays under generated text,
- * so the character is not heard saying words that are not the ones on screen.
- * Restored when the encounter ends, or when real synthesised speech arrives. */
-static BOOLEAN aiSpeechMuted = FALSE;
-
 /* The last generated line, so it can be shown again on request. */
 static char aiLastSpoken[AI_MAX_TEXT] = "";
 static char aiLastClip[128] = "";
@@ -1683,54 +1678,21 @@ AiOnWait (void)
 	++aiWaitTicks;
 }
 
-/* The clip a generated line borrows to hang its subtitles on.
+/* A filename that deliberately does not exist.
  *
- * SpliceTrack gives every subtitle page its own slice of the carrier, walking
- * an offset forward through the file as it goes. Once that offset passes the
- * end of the recording each remaining page gets an empty decoder: the pages
- * flash by faster than anyone can read them, the track runs out, and the
- * segue ends on !curTrack with most of the line never shown.
+ * SoundDecoder_Load answers a missing file with a silence decoder of exactly
+ * the length asked for - decoder.c:366, "fake decoder, keeps voiceovers and
+ * etc. going" - which is how the game shows subtitles at all when speech is
+ * switched off and no clip is installed. A generated line wants precisely
+ * that: pages carried by silence, for a duration we choose.
  *
- * So the carrier has to be LONGER than the line it carries. Borrowing the
- * clip at index 0 made that a matter of luck - whatever the character happens
- * to say first. It is 56s for the Spathi, which is the only reason Fwiffo
- * always read correctly, and 1.15s for the Commander, who was truncated on
- * nearly every reply.
- *
- * The longest clip is the one wanted, and a recording's length is set by how
- * much text it recites, so the longest phrase names it. That is measured
- * rather than assumed: for the Commander, the Spathi and the starbase alike
- * the longest phrase is exactly the longest clip - 90s, 131s and 121s against
- * the 1.15s, 56.7s and 2.29s at index 0. */
-static UNICODE *
-AiCarrierClip (void)
-{
-	STRING phrases = CommData.ConversationPhrases;
-	COUNT count = GetStringTableCount (phrases);
-	UNICODE *best = NULL;
-	COUNT bestLen = 0;
-	COUNT i;
-
-	for (i = 0; i < count; ++i)
-	{
-		STRING phrase = SetAbsStringTableIndex (phrases, i);
-		UNICODE *clip = (UNICODE *)GetStringSoundClip (phrase);
-		COUNT len;
-
-		/* The player's own phrases carry no recording to borrow. */
-		if (clip == NULL || clip[0] == '\0')
-			continue;
-
-		len = GetStringLengthBin (phrase);
-		if (best == NULL || len > bestLen)
-		{
-			best = clip;
-			bestLen = len;
-		}
-	}
-
-	return best;
-}
+ * This replaces borrowing a real recording. That had to be muted, since the
+ * character would otherwise be heard saying words that were not the ones on
+ * screen, and it capped a line at whatever the character happened to have on
+ * tape - under 20 seconds for the Zoq-Fot-Pik, and 1.15 seconds for the
+ * Commander before the carrier was chosen by length. Silence has no such
+ * ceiling and sounds like nothing, which is what it should sound like. */
+#define AI_SILENT_CARRIER "uqmai-generated-line.ogg"
 
 /* Speaks a generated line, with generated speech when there is any.
  *
@@ -1761,36 +1723,18 @@ AiSpeakGenerated (const char *text, const char *clip)
 	{	/* Synthesised speech: the clip IS this line, so let it set the pace. */
 		log_add (log_Debug, "AI: speaking with generated clip %s", clip);
 		aiTextPaced = FALSE;
-		if (aiSpeechMuted)
-		{	/* Synthesised speech IS this line, so it must be audible. */
-			aiSpeechMuted = FALSE;
-			SetSpeechVolume (speechVolumeScale);
-		}
 		track = (UNICODE *)clip;
 	}
 	else
-	{	/* No recording of these words exists, so a clip is borrowed purely to
-		 * hang the subtitles on - SpliceTrack attaches text to decoded audio
-		 * and has no text-only path. Its LENGTH must not decide how long the
-		 * words stay up, so the line is paced by reading time instead.
+	{	/* No recording of these words exists. SpliceTrack attaches text to
+		 * decoded audio and has no text-only path, so the pages are carried
+		 * by silence instead - a file that is not there, which the decoder
+		 * answers with exactly the run time asked of it.
 		 *
-		 * And it must not be HEARD: the borrowed clip is a real recording of
-		 * the character saying something else, so playing it under generated
-		 * text has them audibly say the wrong words. Speech is muted for the
-		 * duration and restored when the encounter ends. */
+		 * Nothing is heard, nothing has to be muted, and the length of the
+		 * line no longer depends on what the character has on tape. */
 		aiTextPaced = TRUE;
-		if (!aiSpeechMuted)
-		{
-			aiSpeechMuted = TRUE;
-			SetSpeechVolume (0.0f);
-		}
-		track = AiCarrierClip ();
-		if (track == NULL)
-		{	/* No voice pack installed: nothing to hang subtitles on. */
-			log_add (log_Warning,
-					"AI: no carrier clip; generated line not shown");
-			return;
-		}
+		track = (UNICODE *)AI_SILENT_CARRIER;
 	}
 
 	StopTrack ();
@@ -2575,13 +2519,6 @@ InitCommunication (CONVERSATION which_comm)
 	aiLastSpoken[0] = '\0';
 	aiLastClip[0] = '\0';
 	aiTextPaced = FALSE;
-
-	if (aiSpeechMuted)
-	{	/* Leaving speech muted would silence the whole game. */
-		aiSpeechMuted = FALSE;
-		SetSpeechVolume (speechVolumeScale);
-	}
-
 
 	if (LastActivity & CHECK_LOAD)
 	{
