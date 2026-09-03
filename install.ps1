@@ -104,13 +104,25 @@ if (-not $SkipBuild) {
     }
 }
 
-# The API key is checked but never stored by this script.
-if ($env:ANTHROPIC_API_KEY) {
-    Write-Ok 'ANTHROPIC_API_KEY is set'
-} else {
-    Write-Warn ('ANTHROPIC_API_KEY is not set. Conversation is billed to your own ' +
-                'Anthropic API account; see the README. A Claude Pro/Max ' +
-                'subscription cannot be used.')
+# Credentials are checked but never stored by this script.
+$provider = if ($env:UQMAI_PROVIDER) { $env:UQMAI_PROVIDER } else { 'claude' }
+switch ($provider) {
+    'local' {
+        Write-Ok "provider 'local' - no API key needed, nothing is billed"
+    }
+    'openai' {
+        if ($env:OPENAI_API_KEY) { Write-Ok "provider 'openai', OPENAI_API_KEY is set" }
+        else { Write-Warn "provider 'openai' but OPENAI_API_KEY is not set" }
+    }
+    default {
+        if ($env:ANTHROPIC_API_KEY) { Write-Ok "provider 'claude', ANTHROPIC_API_KEY is set" }
+        else {
+            Write-Warn ('ANTHROPIC_API_KEY is not set. Conversation is billed to your ' +
+                        'own Anthropic API account. No chat subscription (Claude ' +
+                        'Pro/Max or ChatGPT) can be used. To play at no cost, set ' +
+                        "UQMAI_PROVIDER=local and run a model with Ollama.")
+        }
+    }
 }
 
 if ($script:Failures.Count -gt 0) {
@@ -232,19 +244,23 @@ try {
     Pop-Location
 }
 
-if ($env:ANTHROPIC_API_KEY) {
+$canRunLive = ($provider -eq 'local') -or
+              ($provider -eq 'openai' -and $env:OPENAI_API_KEY) -or
+              ($provider -eq 'claude' -and $env:ANTHROPIC_API_KEY)
+if ($canRunLive) {
     Push-Location $AiDir
     try {
-        # Makes one real request. Catches a rejected key or an empty balance,
-        # both of which look fine until something is actually asked.
-        & $VenvPython -m uqm_ai --provider claude --preflight
+        # Makes one real request. Catches a rejected key, an empty balance or
+        # a local server that was never started - all of which look healthy
+        # until something is actually asked.
+        & $VenvPython -m uqm_ai --provider $provider --preflight
         if ($LASTEXITCODE -eq 0) { Write-Ok 'live connectivity check passed' }
         else { Write-Warn 'live check failed; see output above' }
     } finally {
         Pop-Location
     }
 } else {
-    Write-Skip 'live check skipped (no ANTHROPIC_API_KEY)'
+    Write-Skip "live check skipped (no credentials for '$provider')"
 }
 
 # ---------------------------------------------------------------------------
@@ -260,8 +276,10 @@ Write-Host @"
   As plain MegaMod, no AI:
       .\UrQuanMasters.exe --no-ai
 
-  Set your API key first if you have not:
-      `$env:ANTHROPIC_API_KEY = 'sk-ant-...'
+  Pick a backend and give it credentials:
+      `$env:ANTHROPIC_API_KEY = 'sk-ant-...'                       # Claude
+      `$env:UQMAI_PROVIDER = 'openai'; `$env:OPENAI_API_KEY = '...'  # OpenAI
+      `$env:UQMAI_PROVIDER = 'local'                                # free, via Ollama
 
   Keep a log when reporting a problem:
       .\UrQuanMasters.exe --logfile=game.log

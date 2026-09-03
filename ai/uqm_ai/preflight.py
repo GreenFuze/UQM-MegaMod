@@ -45,8 +45,12 @@ class Preflight:
 
         if provider == "claude":
             problems.extend(self._check_sdk())
-            if not problems and live:
-                problems.extend(self._check_live())
+
+        # The live check is worth running for every real backend: a wrong
+        # model name or a local server that is not started looks exactly like
+        # a healthy install until something is actually asked of it.
+        if provider != "mock" and not problems and live:
+            problems.extend(self._check_live(provider))
 
         return problems
 
@@ -114,37 +118,37 @@ class Preflight:
 
         return found
 
-    def _check_live(self) -> list[Problem]:
+    def _check_live(self, provider: str = "claude") -> list[Problem]:
         """Make one real request. This is the only check that catches a
         rejected key, an exhausted balance or an untrusted working directory,
         because all three look perfectly healthy until something is actually
         asked."""
-        import anyio
-
-        from .providers.claude import ClaudeProvider
-
         try:
-            provider = ClaudeProvider(timeout_s=45.0)
+            if provider == "claude":
+                from .providers.claude import ClaudeProvider
+
+                backend = ClaudeProvider(timeout_s=45.0)
+            else:
+                from .providers.openai_compat import OpenAICompatProvider
+
+                backend = OpenAICompatProvider(preset=provider, timeout_s=45.0)
         except Exception as exc:  # noqa: BLE001
             return [Problem(f"provider unavailable: {exc}", "see above")]
 
-        async def ask() -> str:
-            return await provider._complete(  # noqa: SLF001 - deliberate probe
+        try:
+            reply = backend._complete(  # noqa: SLF001 - deliberate probe
                 "Reply with the single word OK.", "ping"
             )
-
-        try:
-            reply = anyio.run(ask)
         except Exception as exc:  # noqa: BLE001
             # Prefer the CLI's own words, which the provider captured, over
             # the SDK's opaque wrapper text.
             return [Problem(
-                provider._describe(exc, provider._last_result),  # noqa: SLF001
+                backend._describe(exc, backend._last_result),  # noqa: SLF001
                 self._live_fix(),
             )]
 
         if not reply.strip():
-            return [Problem("the Claude CLI returned an empty response",
+            return [Problem("the model returned an empty response",
                             self._live_fix())]
         return []
 

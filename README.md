@@ -1,221 +1,320 @@
+# UQM MegaMod AI — POC
 
-![title](https://github.com/JHGuitarFreak/UQM-MegaMod/assets/104330805/d6f09a02-5eec-4bb7-81d6-4e5e049fd856)
-___
+**Talk to the aliens. In your own words.**
 
-<h4 align="center">A fork of The Ur-Quan Masters + HD-mod that remasters the HD graphics with a veritable smorgasbord of extra features, options, QoL improvements, and much more...</h4>
+A proof of concept that replaces *The Ur-Quan Masters*' fixed dialogue menus with
+free-text conversation. Instead of picking option 2 of 4, you type what you want to
+say — and the character answers in their own voice, from what they actually know at
+that point in the story.
 
-<p align="center">
+Built on [UQM MegaMod](https://github.com/JHGuitarFreak/UQM-MegaMod). Powered by Claude.
 
-<a href="https://sourceforge.net/projects/uqm-mods/files/MegaMod/0.8.4/">
-<img alt="SourceForge Downloads (folder)" src="https://img.shields.io/sourceforge/dt/uqm-mods/MegaMod"></a>
-<a href="https://github.com/JHGuitarFreak/UQM-MegaMod/pulls">
-	<img src="https://img.shields.io/github/issues-pr/JHGuitarFreak/UQM-MegaMod" alt="Pull Requests Badge"/></a>	
-<a href="https://github.com/JHGuitarFreak/UQM-MegaMod/issues">
-	<img src="https://img.shields.io/github/issues/JHGuitarFreak/UQM-MegaMod" alt="Issues Badge"/></a>	
-<a href="https://github.com/JHGuitarFreak/UQM-MegaMod/graphs/contributors">
-	<img alt="GitHub contributors" src="https://img.shields.io/github/contributors/JHGuitarFreak/UQM-MegaMod?color=2b9348"></a>	
-<a href="https://github.com/JHGuitarFreak/UQM-MegaMod/blob/master/LICENSE">
-	<img src="https://img.shields.io/github/license/JHGuitarFreak/UQM-MegaMod?color=2b9348" alt="License Badge"/></a>
-	
-</br>
+> Looking for MegaMod itself, and its own very long list of features? That readme is
+> preserved here as **[README-MegaMod.md](README-MegaMod.md)**. This fork changes one
+> thing about MegaMod and inherits everything else from it.
 
-<a href="https://sourceforge.net/projects/uqm-mods/files/MegaMod/0.8.4/">
-	<img src="https://img.shields.io/github/v/release/JHGuitarFreak/UQM-MegaMod?label=Latest%20release&style=social" alt="Latest release"/></a>	
-<a href="https://GitHub.com/JHGuitarFreak/UQM-MegaMod/commit/">
-	<img src="https://img.shields.io/github/commits-since/JHGuitarFreak/UQM-MegaMod/0.8.4.svg?style=social" alt="GitHub commits"/></a>	
-<a href="https://github.com/JHGuitarFreak/UQM-MegaMod/stargazers">
-	<img src="https://img.shields.io/github/stars/JHGuitarFreak/UQM-MegaMod" alt="Stars Badge"/></a>	
-<a href="https://github.com/JHGuitarFreak/UQM-MegaMod/network/members">
-	<img src="https://img.shields.io/github/forks/JHGuitarFreak/UQM-MegaMod" alt="Forks Badge"/></a>	
-<a href="https://github.com/aregtech/areg-sdk/watchers">
-	<img src="https://img.shields.io/github/watchers/aregtech/areg-sdk?style=social" alt="Watchers"/></a>
-	
-</p>
-<p align="center">
+> **This is a proof of concept, not a finished mod.** It has been played mainly through
+> two encounters: Fwiffo's first meeting on Pluto, and Commander Hayes at the start of
+> the game. Everything else is authored and loads, but has never been played. See
+> [Limitations](#limitations) — please read that section before forming an opinion.
 
-<a href="https://uqm-mods.sourceforge.net/Discord">
-	<img src="https://img.shields.io/badge/discord-7289da.svg?style=for-the-badge&logo=discord" alt="discord"></a>
+---
 
-</p>
+## The one design rule
 
-___
+The interesting problem here isn't getting a model to talk like Fwiffo. It's stopping
+it from *lying to you about the game*.
 
-## Changes from the original
+An AI that can change game state can promise you a ship it can't deliver, unlock a
+plot flag you didn't earn, or tell you the Chmmr are ready when they aren't. So it
+can't:
 
-The changes are too numerous to list here so I've provided a couple of links to help out in this regard...
+> **The game owns all state. The AI owns language and consent, and nothing else.**
 
-The full changelog can be found in the root of this repository: [Changelog](https://github.com/JHGuitarFreak/UQM-MegaMod/blob/0.8.4/MegaMod%20Changelog.txt)
+Concretely, each turn the encounter exports the actions it is willing to accept right
+now. The AI may do exactly three things: pick **one** of those actions, decide whether
+the character goes along with it, and write the prose. There is no path from model
+output to a game state write. Every choice is re-checked in Python and then again in C
+against the actions that were actually offered that turn.
 
-The master list of every change in MegaMod can be found on the main website's [About](https://uqm-mods.sourceforge.net/About) page 
+So the model can be wrong, or hallucinate wildly, and the worst it produces is a
+character saying something odd. It cannot corrupt your save or make the game
+unwinnable.
+
+The second rule follows from the first: a character can only talk about what they know
+*yet*. The prompt for a given turn simply doesn't contain the things the story hasn't
+unlocked — you can't instruct a model that already knows Star Control II not to spoil
+it, so it's never told. 459 game state flags gate this.
+
+---
+
+## Screenshots
+
+<!--
+    Capture with F8 in-game; files land in
+    %APPDATA%\uqm-megamod\screenshots\
+    Drop two or three here and uncomment:
+
+![Fwiffo, first contact](docs/screenshots/fwiffo-first-contact.png)
+![Commander Hayes](docs/screenshots/hayes-briefing.png)
+-->
+
+*Coming — press <kbd>F8</kbd> in-game to capture; they save to
+`%APPDATA%\uqm-megamod\screenshots\`.*
+
+---
+
+## Prerequisites
+
+| Need | Why |
+|---|---|
+| **Windows** | The game builds 32-bit MSVC only |
+| **Python 3.11+**, 64-bit | The AI sidecar. 3.11 is the floor — character files are parsed with `tomllib` |
+| **Git** | Fetches the pinned game content |
+| **A model to talk to** | Either an API key (Anthropic or OpenAI) or a local model such as Ollama, which is free — see [Choosing a model](#choosing-a-model) |
+| **Visual Studio 2022** with *Desktop development with C++* | Only to build the game. Community edition is free; skip with `-SkipBuild` |
+
+Optional, for synthesised speech: several GB of `torch` + `chatterbox-tts`. Voice is
+**off by default** and you don't need it.
+
+---
 
 ## Install
-<p align="center">
 
-<a href="https://sourceforge.net/projects/uqm-mods/files/MegaMod/0.8.4/mm-0.8.4-win32.exe/download">
-<img height="38" alt="SourceForge Downloads (folder)" src="https://img.shields.io/sourceforge/dt/uqm-mods/MegaMod/0.8.4/mm-0.8.4-installer.exe?style=for-the-badge&logo=windows&logoSize=auto&label=Windows"></a>
+```powershell
+git clone -b ai-edition https://github.com/GreenFuze/UQM-MegaMod.git uqm-megamod
+cd uqm-megamod
+.\install.ps1
+```
 
+`install.ps1` checks your prerequisites, clones the pinned content, creates the
+virtual environment the game looks for, builds, and then runs the sidecar's own
+preflight so a broken install tells you here rather than halfway through a
+conversation. It is safe to re-run — every step is skipped if already done.
 
-<a href="https://flathub.org/apps/net.sourceforge.uqm_mods.UQM-MegaMod">
-<img height="38" alt="Flathub Download" src="https://img.shields.io/flathub/downloads/net.sourceforge.uqm_mods.UQM-MegaMod?style=for-the-badge&logo=flathub&logoSize=auto&label=FlatHub"></a>
+```powershell
+.\install.ps1 -WithVoice     # also install speech synthesis
+.\install.ps1 -SkipBuild     # you already have UrQuanMasters.exe
+```
 
-</p>
+### Doing it by hand
 
-## Compiling
-
-### Requirements
-
-* Environment:
-	* Windows 10+ ([MSYS2/MinGW](https://www.msys2.org/) or [Visual Studio](https://visualstudio.microsoft.com/vs/community/) recommended)
-	* macOS 10.13+ ([brew](https://brew.sh/) recommended for personal builds)
-	* Any modern Linux distribution
-* Hard Dependencies
-	* [SDL2](https://www.libsdl.org/)
-	* [libPNG](http://www.libpng.org/pub/png/libpng.html)
-	* [libOGG](https://xiph.org/ogg/)
-	* [libVorbis](https://xiph.org/vorbis)
-	* [zlib](https://www.zlib.net/)
-	* [UQM-MegaMod-Content](https://github.com/JHGuitarFreak/UQM-MegaMod-Content/)
-* Optional Dependencies
-	* [SDL1](https://github.com/libsdl-org/SDL-1.2) (For systems that do not support SDL2)
-
-
-> [!IMPORTANT]  
-> After downloading or cloning this repository make sure you install the UQM-MegaMod-Content first before trying to run the compiled binary  
- 
 <details>
-<summary>UQM-MegaMod Content</summary>
+<summary>Manual steps</summary>
 
-This process assumes you've downloaded or cloned this repository already.
+```powershell
+# 1. Content, pinned. autocrlf MUST be off - these are binary assets under
+#    names git treats as text, and translation silently corrupts them.
+git -c core.autocrlf=false clone --depth 1 -b 0.8.5 `
+    https://github.com/JHGuitarFreak/UQM-MegaMod-Content.git ..\uqm-megamod-content
 
-Download or clone the [UQM-MegaMod-Content](https://github.com/JHGuitarFreak/UQM-MegaMod-Content/) repository and copy *all* the files within the content repository into the `UQM-MegaMod/content` folder of your downloaded or cloned UQM-MegaMod repository.
+# Sanity check: this file must be exactly 30 bytes. 31 means CRLF corruption.
+(Get-Item ..\uqm-megamod-content\base\planets\alkali-med.ani).Length
 
-It should look like this: 
+# 2. The sidecar. The game looks for ai\.venv\Scripts\python.exe specifically.
+python -m venv ai\.venv
+ai\.venv\Scripts\python.exe -m pip install claude-agent-sdk pytest
 
-![Content Repo Preview](https://github.com/JHGuitarFreak/UQM-MegaMod/assets/104330805/9da1969c-a514-45fd-8826-842a1f256fd5)
+# 3. Build (Win32 - the 32-bit build is why the AI is a separate process at all)
+& "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" `
+    build\msvs2019\UrQuanMastersMegaMod.sln /p:Configuration=Release /p:Platform=Win32
+```
 
 </details>
 
+---
 
-<details>
-<summary>Windows 10+</summary>
+## Running
 
-#### Visual Studio 
+Pick a backend and give it credentials — once per session, or permanently in
+your environment:
 
-I've made this process super easy, as long as you have Visual Studio 2008 or Visual Studio 2015-2022.  
-For Visual Studio 2008 the solution file is under `UQM-MegaMod/build/msvs2008` for Visual Studio 2015-2022 the solution file is under `build/msvs2019`  
-Just load up the solution file and compile away.
+```powershell
+# Claude (the only one this has actually been tested with)
+$env:ANTHROPIC_API_KEY = 'sk-ant-...'
 
-Once the build is complete you'll either have a `UrQuanMasters.exe` or `UrQuanMastersDebug.exe` in the root directory that you can run directly.
+# ...or OpenAI
+$env:UQMAI_PROVIDER = 'openai'; $env:OPENAI_API_KEY = 'sk-...'
 
-If you get a message about missing .dll files they can be found in the `UQM-MegaMod/dev-lib/lib` directory.
-Copy them to the root UQM-MegaMod directory.  
-The .dll are as follows:
+# ...or a local model: free, private, no account
+$env:UQMAI_PROVIDER = 'local'      # Ollama on localhost:11434
+```
 
-	libpng16.dll
-	ogg.dll
-	OpenAL32.dll
-	SDL2.dll
-	vorbis.dll
-	vorbisfile.dll
-	wrap_oal.dll
-	zlib1.dll
+Then:
 
-#### MSYS2
+```powershell
+.\UrQuanMasters.exe                 # AI conversation, subtitles - the default
+.\UrQuanMasters.exe --ai-voice      # ...with synthesised speech
+.\UrQuanMasters.exe --no-ai         # plain MegaMod, no AI at all
+.\UrQuanMasters.exe --logfile=game.log   # keep a log when reporting a problem
+```
 
-Make sure you've installed all the necessary packages by executing these two commands in the MSYS2 bash:
+Run it from the repo root — the game finds the sidecar as `ai` relative to the
+executable.
 
-	pacman -Syuu
+**In a conversation:** type and press Enter. <kbd>→</kbd> or <kbd>Enter</kbd> pages
+forward, <kbd>Esc</kbd> skips. Replies take
+several seconds — you'll see *(transmitting...)* while the character thinks.
 
-then
+---
 
-	pacman -S make pkg-config mingw-w64-i686-gcc mingw-w64-i686-libogg \
-		mingw-w64-i686-libpng mingw-w64-i686-libsystre \
-		mingw-w64-i686-libvorbis mingw-w64-i686-SDL2 mingw-w64-i686-zlib
+## Choosing a model
 
-Start a MSYS2 MinGW 32-bit bash, `cd` to the UQM-MegaMod directory, then execute this command: 
+Set `UQMAI_PROVIDER` to one of:
 
-	./build.sh uqm -j
+| `UQMAI_PROVIDER` | Talks to | Credentials | Cost |
+|---|---|---|---|
+| `claude` *(default)* | Anthropic, via the Claude Agent SDK | `ANTHROPIC_API_KEY` | per token |
+| `openai` | OpenAI chat completions | `OPENAI_API_KEY` | per token |
+| `local` | Any OpenAI-compatible server on your machine — [Ollama](https://ollama.com), llama.cpp, LM Studio, vLLM | none | **free** |
 
-When executing this command for the first time you'll come to a configuration screen where you can select a few developer-centric options.
-Just hit enter and UQM will start building. It'll take awhile and you'll see a few scary warnings but everything should build fine.
+Override the endpoint and model for any of them:
 
-Once the build is complete you'll either have a `UrQuanMasters.exe` or `UrQuanMastersDebug.exe` in the root directory that you can run directly.
+```powershell
+$env:UQMAI_BASE_URL = 'http://localhost:11434/v1'
+$env:UQMAI_MODEL    = 'llama3.1:8b'
+```
 
-If you get a message about missing .dll files they can be copied to the root directory via running the `msys2-depend.sh` bash script like so:
+Because `local` is just a base URL, anything speaking the OpenAI protocol works —
+including OpenRouter, or a server on another machine on your network.
 
-	./msys2-depend.sh
+**Only Claude has actually been tested.** The OpenAI and local backends share all of
+the prompt, contract and validation code with it — a backend supplies one method — so
+they should work, but nobody has played the game through them. A smaller local model
+will likely be worse at staying in character and at picking the right response; the
+safety rule holds regardless, because it is enforced in the game, not the model.
 
-Note though that this script does not work for Visual Studio compiled binaries.
+---
 
-</details>
+## Cost and licensing
 
-<details>
-<summary>Linux</summary>
+**Read this before distributing anything.**
 
-On Debian based distros it's fairly simple, just install the following packages:  
+With `claude` or `openai`, conversation is billed to **your own API account** — no key
+is bundled. Expect roughly 2–10k input tokens per turn depending on how much of the
+story the character has unlocked. With `local` it costs nothing and no data leaves
+your machine.
 
-	sudo apt-get install build-essential libogg-dev libpng-dev \
-			libsdl2-dev libvorbis-dev libz-dev
+**Neither a Claude Pro/Max nor a ChatGPT Plus/Pro subscription can be used for this.**
+Both vendors bill their chat subscriptions separately from their APIs, and neither
+permits a third-party program to authenticate as a subscriber. Anthropic's Agent SDK
+terms are explicit:
 
-Then when those have finished installing you can either clone the repository or download the source tarball and extract it wherever you like, taking note of where it is.
+> Unless previously approved, Anthropic does not allow third party developers to offer
+> claude.ai login or rate limits for their products, including agents built on the
+> Claude Agent SDK. Use the API key authentication methods described in the Quickstart
+> instead.
 
-`cd` to the UQM-MegaMod directory, then execute this command: 
+OpenAI is the same story from the other side: ChatGPT Plus and Pro do not include API
+access or let you mint a key, so a Codex or ChatGPT login cannot drive this either.
 
-	./build.sh uqm -j
+Use of the Agent SDK is governed by Anthropic's
+[Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms) when it
+powers something you make available to others. An earlier version of this project
+leaned on the signed-in Claude Code CLI; that was wrong and has been removed.
 
-When executing this command for the first time you'll come to a configuration screen where you can select a few developer-centric options.
-Just hit enter and UQM will start building. It'll take awhile and you'll see a few scary warnings but everything should build fine.
+Anthropic runs a *Claude for Open Source* program, but it grants a **subscription to
+the maintainer**, not distributable API access — useful for developing this, no help
+for the person playing it. If per-token cost is the obstacle, the answer is
+`UQMAI_PROVIDER=local`.
 
-Once the build is complete you'll either have a `UrQuanMasters` or `UrQuanMastersDebug` binary in the root directory that you can run directly.
+---
 
-</details>
+## Limitations
 
-<details>
-<summary>macOS</summary>
+Being honest about a proof of concept is the whole point of calling it one.
 
-Install Xcode from the App Store, and then when you run it the first time make sure to install "Additional components".  
-You can then install brew from https://brew.sh and then use it to install your requirements from the Terminal:
+**What has actually been played**
 
-	brew install libogg libpng libvorbis sdl2
+- Fwiffo's first encounter on Pluto
+- Commander Hayes at the start of the game (the pre-starbase conversation)
 
+**What has not**
 
-Then when those have finished installing you can either clone the MegaMod repository or download the source tarball and extract it wherever you like, taking note of where it is.
+- **25 of 27 characters.** They are all authored — 27 character files, 239 knowledge
+  entries, and the test suite checks that every game flag and every phrase key they
+  name really exists — but nobody has held a conversation with most of them.
+- **The starbase Commander.** Hayes has two conversations: a 94-phrase one before the
+  starbase exists and a 267-phrase one after. Most of the authoring effort went into
+  the second, and it has never been exercised in play.
+- Conversation memory across sessions, and the end-of-conversation summary. Both
+  implemented, neither confirmed working in a real game.
+- Replaying the last generated line with <kbd>←</kbd>. Implemented, never confirmed.
+- **The OpenAI and local backends.** Written and unit-tested, never played through.
+  Only Claude has been used in a real game.
 
-`cd` to the UQM-MegaMod directory, then execute this command: 
+**Known rough edges**
 
-	./build.sh uqm -j
+- **Latency.** A reply takes several seconds; an action that fires costs two model
+  calls, so longer. There's a *(transmitting...)* indicator, and that's all.
+- **Pacing.** Generated lines are held ten seconds a page, which is deliberately
+  generous. Press <kbd>→</kbd> to move on.
+- **The AI picks your line for you.** Your free text is matched to the nearest action
+  the encounter offered, and that authored line may carry specifics you never said.
+  This is handled — the narration is told not to hand claims back to you that you
+  didn't make — but it's the least settled part of the design.
+- **Length.** Characters sometimes answer at more length than the original ever would.
+- **No voice for generated text unless you install synthesis.** Subtitles are carried
+  on silence, so a character's mouth moves without sound. This is intentional: the
+  alternative was playing a real recording of them saying something else.
+- **Not translated.** The prompts and character files are English only.
 
-When executing this command for the first time you'll come to a configuration screen where you can select a few developer-centric options.
-Just hit enter and UQM will start building. It'll take awhile and you'll see a few scary warnings but everything should build fine.
+**Not a limitation, worth stating anyway:** the AI cannot break your save. See
+[the one design rule](#the-one-design-rule).
 
-Once the build is complete you'll either have a `UrQuanMasters` or `UrQuanMastersDebug` binary in the root directory that you can run directly.
+---
 
-</details>
+## How it works
 
-___
+```
+UrQuanMasters.exe  (32-bit)                 ai\.venv\python.exe  (64-bit)
+┌────────────────────────────┐              ┌──────────────────────────────┐
+│ comm.c                     │  NDJSON      │ sidecar                      │
+│  • exports offered actions │─── stdio ───▶│  • builds the character       │
+│  • dispatches the choice   │              │    prompt for this turn      │
+│  • speaks the outcome      │◀─────────────│  • calls Claude              │
+│  • re-validates in C       │              │  • validates the reply       │
+└────────────────────────────┘              └──────────────────────────────┘
+```
 
-> [!CAUTION]
-> ### Mod Compatibility
->
-> MegaMod is not compatible with any other mods nor are they compatible with MegaMod.
-MegaMod is completely independant from Core UQM, HD-Mod, HD-Remix, Crazy Mod, Balance Mod, Extended, or any other mods.
-As such MegaMod has its own packages and add-ons.
->
-> For example the HD-Mod add-on package `hires4x.zip` is not compatible with MegaMod as MegaMod has its own HD package currently named `mm-0.8.4-hd-content.uqm`.
->
-> And as MegaMod is not compatible with any other mods, do not install it over any existing UQM installations.
->
-> All MegaMod compatible add-ons and content can be found on the main website's Download page: https://uqm-mods.sourceforge.net/Download
+The sidecar is a separate process because the game is a 32-bit build and can't host a
+64-bit Python. It's started before anything is drawn, so a missing prerequisite is one
+readable refusal at startup instead of a conversation that appears to hang.
 
-___
+Each character's knowledge comes from two places: their own authored dialogue, mined
+from the original game's phrase tables (27 characters, 3,377 phrases, ~88,000 words of
+NPC dialogue), plus a hand-written file in `ai/characters/*.toml` giving their voice,
+what they know when, and what they genuinely don't.
 
-## Contributors
+Run the tests with:
 
-Me (JHGuitarFreak), SlightlyIntelligentMonkey, Volasaurus, Ala-lala, Kruzenshtern, Taleden, Jordan Lo, Tarponpet, and King Duncan.
+```powershell
+cd ai; .venv\Scripts\python.exe -m pytest tests\ -q   # 283 tests
+```
 
-The main menu music for the MegaMod is brought to you by...
-* Saibuster A.K.A. Itamar.Levy: https://s3.amazonaws.com/starcontrol/files/fan/music/Various/saibuster-hyprespace.mp3
-* Mark Vera A.K.A. Jouni Airaksinen: https://www.youtube.com/watch?v=rsSc7x-p4zw
-* Rush AX: https://s3.amazonaws.com/starcontrol/files/fan/music/Rush/HSpace%20Rush%20MIX.mp3
+---
 
-And the default Super Melee menu music is by Flashira Nakirov.
+## Credits
+
+This is a fork of a fork, and almost none of it is mine.
+
+- **[UQM MegaMod](https://github.com/JHGuitarFreak/UQM-MegaMod)** by **JHGuitarFreak**
+  — the base this is built on, and an enormous body of work: HD remastering, quality
+  of life, options and features far beyond the original. Everything here rides on it.
+- **[The Ur-Quan Masters](https://sc2.sourceforge.net/)** — the open source port that
+  kept the game alive and playable for over twenty years.
+- **Paul Reiche III** and **Fred Ford** — for *Star Control II*, and for releasing the
+  source and content that made all of this possible.
+- **Toys for Bob** and **Accolade** — the 1992 original.
+- Every line of dialogue an alien speaks here was written by the original authors. The
+  AI rewords; it does not invent the game.
+
+## Licence
+
+Code is **GPL v2**, inherited from The Ur-Quan Masters — see [LICENSE](LICENSE).
+Game content is under its own terms; see the MegaMod content repository.
+Use of the Claude Agent SDK is governed by
+[Anthropic's Commercial Terms](https://www.anthropic.com/legal/commercial-terms).
+
+This project is not affiliated with or endorsed by Anthropic, Toys for Bob, or the UQM
+or MegaMod teams.

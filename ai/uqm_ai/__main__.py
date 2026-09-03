@@ -109,8 +109,14 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(__file__).resolve().parents[2],
         help="path to the uqm-megamod checkout",
     )
-    parser.add_argument("--provider", default="mock",
-                        choices=["mock", "claude"])
+    parser.add_argument(
+        "--provider", default="mock",
+        choices=["mock", "claude", "openai", "local"],
+        help="'claude' and 'openai' are billed to your own account for that "
+             "vendor; 'local' talks to an OpenAI-compatible server on this "
+             "machine (Ollama by default) and costs nothing. Override the "
+             "endpoint and model with UQMAI_BASE_URL and UQMAI_MODEL",
+    )
     parser.add_argument(
         "--tts",
         default="none",
@@ -130,6 +136,21 @@ def main(argv: list[str] | None = None) -> int:
         help="skip the live provider request during preflight",
     )
     args = parser.parse_args(argv)
+
+    # The game always asks for --provider claude (aiproc.c builds that command
+    # line), so this is how a player chooses a different backend: set it
+    # alongside the key, and no rebuild is involved.
+    chosen = os.environ.get("UQMAI_PROVIDER")
+    if chosen:
+        allowed = ("mock", "claude", "openai", "local")
+        if chosen not in allowed:
+            print(
+                f"[uqm-ai] UQMAI_PROVIDER={chosen!r} is not one of "
+                + ", ".join(allowed),
+                file=sys.stderr,
+            )
+            return 2
+        args.provider = chosen
 
     # Resolving the cast reads the trees and every character file, so a
     # malformed condition or a flag the game does not have stops the sidecar
@@ -182,16 +203,21 @@ def main(argv: list[str] | None = None) -> int:
     # Fail loudly on a provider that cannot start: silently falling back to
     # the mock would look like a working AI producing very poor writing.
     provider: LLMProvider
-    if args.provider == "claude":
-        from .providers.claude import ClaudeProvider
-
+    if args.provider == "mock":
+        provider = MockProvider()
+    else:
         try:
-            provider = ClaudeProvider()
+            if args.provider == "claude":
+                from .providers.claude import ClaudeProvider
+
+                provider = ClaudeProvider()
+            else:
+                from .providers.openai_compat import OpenAICompatProvider
+
+                provider = OpenAICompatProvider(preset=args.provider)
         except ProviderError as exc:
             print(f"[uqm-ai] {exc}", file=sys.stderr)
             return 3
-    else:
-        provider = MockProvider()
 
     # Speech is optional and subtitles are not. Any failure here leaves the
     # game running with subtitles over a carrier clip, unlike a missing LLM,
