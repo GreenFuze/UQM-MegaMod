@@ -642,46 +642,145 @@ class TestJsonSchemaIsCheckedAndRetried:
         assert len(calls) == _MAX_JSON_ATTEMPTS == 3
 
 
-class TestALineIsSpokenAsTheCaptain:
-    """A listed line must not put a claim in the captain's mouth.
+class TestMatchingIsOnPurposeNotWording:
+    """A line is matched for what it is FOR, not for the details it carries.
 
-    Seen in play against Commander Hayes. Two lines were on offer, both
-    same-node, so neither was marked consequential and the "lean towards
-    progress" rule applied. The captain had made a speech about the Alliance
-    of Free Stars needing crew and ships; the model matched the OTHER line -
-    "we are the survivors of a Star Control science research team to the Vela
-    star system" - and the encounter answered the cover story, so Hayes
-    caught the captain in a lie the player had never told. The guard existed
-    but was keyed on irreversibility, and the harm here is misattribution.
+    The first attempt at this required the captain to have made every claim
+    in a line before it could be matched. That was too strict in the wrong
+    place: the line introducing him to Hayes is the ONLY way to introduce
+    himself, and its cover story is the script's invention, so requiring him
+    to guess it would have stalled the introduction entirely. The claims are
+    handled where the harm actually happens - in the narration, which is told
+    not to hand them back to him. See
+    TestNarrationDoesNotAttributeUnsaidClaims.
     """
 
-    def test_the_assertion_rule_is_stated(self) -> None:
+    def test_the_purpose_rule_is_stated(self) -> None:
         from uqm_ai.providers.claude import ClaudeProvider
 
         prompt = ClaudeProvider._build_user_prompt(
             make_request("We are the Alliance of Free Stars.", ["join_us"])
         )
-        assert "ASSERT NOTHING" in prompt
-        assert "spoken AS THE CAPTAIN" in prompt
+        assert "Match on what a line is FOR" in prompt
+        assert "the PURPOSE has to be one he actually had" in prompt
 
-    def test_tone_matching_is_scoped_to_lines_that_assert_nothing(self) -> None:
-        """Tone alone must not reach a line carrying a claim."""
+    def test_null_is_offered_when_no_line_fits_what_he_was_doing(self) -> None:
         from uqm_ai.providers.claude import ClaudeProvider
 
         prompt = ClaudeProvider._build_user_prompt(
             make_request("Hello there.", ["join_us"])
         )
-        tone = prompt.index("match on TONE")
-        scope = prompt.index("TONE ONLY DECIDES BETWEEN LINES THAT ASSERT NOTHING")
-        assert scope > tone, "the limit must follow the rule it limits"
+        assert "choose null and simply talk to him" in prompt
 
-    def test_progress_pressure_excludes_lines_with_claims(self) -> None:
+    def test_the_limit_follows_the_tone_rule_it_limits(self) -> None:
         from uqm_ai.providers.claude import ClaudeProvider
 
         prompt = ClaudeProvider._build_user_prompt(
             make_request("Hello there.", ["join_us"])
         )
-        assert "put no claim in the captain's mouth" in prompt
+        assert prompt.index("Match on what a line is FOR") > prompt.index(
+            "match on TONE"
+        )
+
+
+class TestNarrationDoesNotAttributeUnsaidClaims:
+    """The answer replies to the canonical line, not to what was typed.
+
+    Seen in play: the captain made a speech about the Alliance of Free Stars
+    needing crew and ships, the model matched the line that introduces him
+    with a cover story, and Hayes answered the cover story - catching the
+    captain in a lie about a Star Control survey of Vela that the player had
+    never told. The canonical line is now sent alongside, so the narration
+    can keep the character's own facts and stance while refusing to hand
+    unsaid claims back to the captain as his own words.
+    """
+
+    CANONICAL = ("I am Captain Zelnick of the starship Vindicator. We are the "
+                 "survivors of a Star Control science research team to the "
+                 "Vela star system.")
+    SPEECH = ("We are here to create the alliance of free stars. We will "
+              "demolish the Ur-Quan together. I need crew, and I need ships.")
+
+    @staticmethod
+    def _narrate(canonical: str, player: str) -> NarrateRequest:
+        return NarrateRequest.from_json({
+            "type": "narrate", "id": 7,
+            "session": {"save_id": "slot1",
+                        "character": "comm.commander.dialogue",
+                        "encounter": "COMMANDER"},
+            "player_input": player,
+            "canonical_input": canonical,
+            "authored_text": ("Star Control science mission, eh? I served as a "
+                              "Star Control officer during the war, aboard "
+                              "several cruisers in the Coreward Front, and if "
+                              "there had been any scientific mission to Vela "
+                              "I would have heard about it."),
+        })
+
+    def test_the_canonical_line_is_carried_on_the_wire(self) -> None:
+        request = self._narrate(self.CANONICAL, self.SPEECH)
+        assert request.canonical_input == self.CANONICAL
+
+    def test_it_is_optional(self) -> None:
+        """Older builds send no such field; narration must still work."""
+        request = NarrateRequest.from_json({
+            "type": "narrate", "id": 8,
+            "player_input": "hello",
+            "authored_text": "Hello, Captain.",
+        })
+        assert request.canonical_input == ""
+
+    def test_unstated_names_are_found(self) -> None:
+        from uqm_ai.providers.claude import _unstated_claims
+
+        assert _unstated_claims(self.CANONICAL, self.SPEECH) == (
+            "Zelnick", "Vindicator", "Star Control", "Vela",
+        )
+
+    def test_nothing_is_flagged_when_he_really_said_it(self) -> None:
+        from uqm_ai.providers.claude import _unstated_claims
+
+        told = ("I am Captain Zelnick of the Vindicator - we survived a Star "
+                "Control science survey out at Vela.")
+        assert _unstated_claims(self.CANONICAL, told) == ()
+
+    def test_sentence_openers_are_not_claims(self) -> None:
+        """Otherwise every line would report a claim and the hint is noise."""
+        from uqm_ai.providers.claude import _unstated_claims
+
+        assert _unstated_claims("We are ready. I have the goods.", "ok") == ()
+
+    def test_the_prompt_names_the_gap_and_protects_his_own_facts(self) -> None:
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        prompt = ClaudeProvider._build_narrate_prompt(
+            self._narrate(self.CANONICAL, self.SPEECH)
+        )
+        assert "He never made these claims" in prompt
+        assert "Vela" in prompt
+        assert "Keep every fact and every commitment that is YOURS" in prompt
+        # Not arguing with the claim matters as much as not repeating it:
+        # measured live, disbelieving a mission the captain never mentioned
+        # put "Vela" on screen just as surely as asserting it would have.
+        assert "do NOT ARGUE WITH IT EITHER" in prompt
+        # Both directions of the length trap. Without the ceiling this section
+        # took the narration from 254 characters to 1352 (measured against a
+        # paired control), because it began answering everything the captain
+        # had said; without the floor, the content-loss regression returns.
+        assert "not shorter, and NOT LONGER" in prompt
+        assert "Take up that same one thing" in prompt
+
+    def test_a_faithful_match_adds_no_attribution_section(self) -> None:
+        """No gap, no extra instructions: the ordinary narration is unchanged."""
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        told = ("I am Captain Zelnick of the Vindicator - we survived a Star "
+                "Control science survey out at Vela.")
+        prompt = ClaudeProvider._build_narrate_prompt(
+            self._narrate(self.CANONICAL, told)
+        )
+        assert "He never made these claims" not in prompt
+        assert "Say exactly that, in your own voice" in prompt
 
 
 class TestPromptDoesNotFightTheContract:

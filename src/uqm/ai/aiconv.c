@@ -589,11 +589,21 @@ buildRequest (char *buf, size_t cap, int requestId, const char *playerInput,
 
 static BOOLEAN
 buildNarrateRequest (char *buf, size_t cap, int requestId,
-		const char *playerInput, const char *authoredText)
+		const char *playerInput, const char *canonicalInput,
+		const char *authoredText)
 {
 	AiJsonWriter w;
 
 	beginRequest (&w, buf, cap, "narrate", requestId, playerInput);
+
+	/* The authored line the encounter took the captain to have said. It is
+	 * what authoredText is an answer TO, and it is rarely what the captain
+	 * actually said: free text is matched to the nearest exported action, so
+	 * the answer can end up replying to claims its own wording carries and
+	 * the player never made. Sent so the narration can tell the two apart. */
+	if (canonicalInput != NULL && canonicalInput[0] != '\0')
+		AiJson_WriteString (&w, "canonical_input", canonicalInput);
+
 	AiJson_WriteString (&w, "authored_text", authoredText);
 	writeSpokenRefs (&w);
 	writeState (&w);
@@ -603,8 +613,8 @@ buildNarrateRequest (char *buf, size_t cap, int requestId,
 }
 
 BOOLEAN
-AiConv_Narrate (const char *playerInput, const char *authoredText,
-		AI_REPLY *reply)
+AiConv_Narrate (const char *playerInput, const char *canonicalInput,
+		const char *authoredText, AI_REPLY *reply)
 {
 	char line[AI_LINE_MAX];
 	AiJsonObject obj;
@@ -616,7 +626,7 @@ AiConv_Narrate (const char *playerInput, const char *authoredText,
 	setLastError (NULL);
 
 	if (!buildNarrateRequest (line, sizeof line, aiNextRequestId++,
-			playerInput, authoredText))
+			playerInput, canonicalInput, authoredText))
 	{
 		log_add (log_Warning, "AI: narrate request too large to serialise");
 		return FALSE;

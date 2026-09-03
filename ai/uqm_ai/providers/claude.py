@@ -190,6 +190,53 @@ def _check(raw: str) -> tuple[dict | None, tuple[str, ...]]:
     return payload, _schema_errors(payload)
 
 
+# Capitalised words that start sentences or address someone, rather than
+# naming anything. Without these every canonical line would report a claim.
+_NOT_A_CLAIM = frozenset("""
+a an and but or if so the this that there then these those
+i we you he she it they me us him her them my our your his their its
+am are is was were be been do does did have has had will would can could
+no yes ok okay well now here what where when who why how which
+captain commander sir madam lieutenant admiral hello greetings
+""".split())
+
+# A name, or a run of names: "Vela", "Star Control", "Sa-Matra".
+_PROPER = re.compile(r"\b[A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)*")
+
+
+def _names(text: str) -> list[str]:
+    """The proper names a line uses, in the order it uses them."""
+    found = []
+    for match in _PROPER.finditer(text or ""):
+        # Trim leading words that are only capitalised for position.
+        words = match.group(0).split()
+        while words and words[0].lower() in _NOT_A_CLAIM:
+            words.pop(0)
+        if words:
+            found.append(" ".join(words))
+    return found
+
+
+def _unstated_claims(canonical: str, player_input: str) -> tuple[str, ...]:
+    """Names the canonical line uses that the captain never actually said.
+
+    A crude diff on purpose. It is a HINT for attribution, not a list of
+    banned words: the character may still speak of these as his own
+    knowledge - Hayes served in Star Control whatever the captain claimed -
+    and the prompt says so. What it must not do is hand them back to the
+    captain as his own words.
+    """
+    if not canonical or not player_input:
+        return ()
+
+    said = player_input.lower()
+    return tuple(
+        dict.fromkeys(
+            name for name in _names(canonical) if name.lower() not in said
+        )
+    )
+
+
 def _correction(problems: tuple[str, ...]) -> str:
     """What to send back so the model can fix its own reply."""
     faults = "\n".join(f"- {problem}" for problem in problems)
@@ -317,16 +364,72 @@ class ClaudeProvider(LLMProvider):
 
     @staticmethod
     def _build_narrate_prompt(request: NarrateRequest) -> str:
+        lines = [
+            "The captain just said to you:",
+            f'"{request.player_input}"',
+            "",
+        ]
+
+        # What the encounter is actually answering. It replies to the
+        # canonical line, not to what was typed, so anything the canonical
+        # line claims and the captain did not say would otherwise be handed
+        # back to him as his own words.
+        gap = _unstated_claims(request.canonical_input, request.player_input)
+        if gap:
+            lines += [
+                "What follows was written as an answer to this canonical line, "
+                "which is the nearest thing in the script to what he said - "
+                "but it is NOT what he said:",
+                f'"{request.canonical_input}"',
+                "",
+                "He never made these claims: " + ", ".join(gap) + ".",
+                "",
+            ]
+
+        lines += [
+            "This is what you say back. It is already settled - it is what "
+            "actually happens, not a suggestion:",
+            "",
+            request.authored_text,
+            "",
+        ]
+
+        if gap:
+            lines += [
+                "That answer was written assuming he had just spoken the "
+                "canonical line. He did not. Rewrite it so it no longer rests "
+                "on that assumption anywhere.",
+                "",
+                "In particular, do not treat anything he never claimed as "
+                "something he told you, and do NOT ARGUE WITH IT EITHER. No "
+                "'a science mission, eh?'. No 'if there had ever been such a "
+                "mission I would have heard of it'. Disputing a story he never "
+                "told invents the story just as surely as believing it would, "
+                "and he is left having said a thing he never said.",
+                "",
+                "Keep every fact and every commitment that is YOURS - what you "
+                "have done, what you know, what you are agreeing or refusing to "
+                "do, and your opinion of him. Those are true and they still "
+                "stand, and your own history is your own to speak of. Keep the "
+                "STANCE of the answer too - your disbelief, your agreement, "
+                "your anger - and aim it at what he ACTUALLY said. Never "
+                "invent a different claim to put in its place.",
+                "",
+                "That answer takes up ONE thing. Take up that same one thing "
+                "and then stop. He may well have said several - the parts this "
+                "answer does not address are not yours to address here, and "
+                "the encounter will come to them in its own time. Do not "
+                "reach for anything else you know in order to answer them.",
+                "",
+                "Match the length of the answer above, give or take a "
+                "sentence. It is the measure of how much you have to say "
+                "here: not shorter, and NOT LONGER.",
+                "",
+            ]
+
         return "\n".join(
-            [
-                "The captain just said to you:",
-                f'"{request.player_input}"',
-                "",
-                "This is what you say back. It is already settled - it is what "
-                "actually happens, not a suggestion:",
-                "",
-                request.authored_text,
-                "",
+            lines
+            + [
                 "Say exactly that, in your own voice, as though you had just "
                 "thought of it. You may change the wording, the rhythm and the "
                 "length, and you may react to what the captain actually said.",
@@ -430,26 +533,23 @@ class ClaudeProvider(LLMProvider):
             "even when the words differ completely."
         )
         lines.append(
-            "But TONE ONLY DECIDES BETWEEN LINES THAT ASSERT NOTHING. A listed "
-            "line is spoken AS THE CAPTAIN, in his own voice, and every claim "
-            "in it becomes something he has just told you - you then answer "
-            "the claim, and he is left having said a thing he never said. So "
-            "a line that asserts something specific about him - who he is, "
-            "where he came from, what he has done, a mission, a place, a name "
-            "- may be matched ONLY if the captain actually said that thing. "
-            "If he made a speech about fighting the Ur-Quan and the line has "
-            "him claiming a survey of some particular star, that is not what "
-            "he said: choose null and simply talk to him. Lines that ASK, "
-            "acknowledge or agree assert nothing about him, and those are the "
-            "ones tone is for."
+            "Match on what a line is FOR, not on the details of its wording. "
+            "A listed line that introduces the captain is the line for "
+            "introducing himself however he words it, and its particular "
+            "claims are the script's, not his - they are handled elsewhere "
+            "and are not your problem here. But the PURPOSE has to be one he "
+            "actually had. A speech about raising an alliance and needing "
+            "crew is not him asking what the red glow around Earth is, and it "
+            "is not him telling you his life story either, unless that is "
+            "plainly what he was doing. When no line is for what he was "
+            "actually doing, choose null and simply talk to him."
         )
         lines.append(
             "IMPORTANT - the conversation only moves forward when you pick a "
             "ref. If you keep choosing null, the captain is stuck repeating "
             "themselves and nothing further ever becomes possible. For the "
             "ordinary back-and-forth lines (those not marked as ending the "
-            "conversation, and that put no claim in the captain's mouth), "
-            "lean towards picking the closest reasonable "
+            "conversation), lean towards picking the closest reasonable "
             "match so things progress. Precision matters far more for the "
             "lines that end the conversation - only pick one of those if the "
             "captain clearly means it."

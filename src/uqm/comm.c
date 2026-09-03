@@ -1870,10 +1870,21 @@ AiSpeakDispatched (ENCOUNTER_STATE *pES, BYTE responseIndex,
 {
 	const char *authored;
 	AI_REPLY narrated;
+	UNICODE canonical[1024];
 
 	pES->cur_response = responseIndex;
 	AiConv_NoteDispatched (
 			(int)pES->response_list[responseIndex].response_ref);
+
+	/* The authored wording of the line being dispatched, taken now because
+	 * SelectResponse clears the response list. The encounter's answer is
+	 * written to reply to THIS, not to what the player typed, so the two are
+	 * sent together and the narration is told which claims are really the
+	 * captain's. Without it the answer echoes back things he never said -
+	 * seen in play, where Hayes caught the captain in a cover story about a
+	 * survey of Vela that the player had never mentioned. */
+	utf8StringCopy (canonical, sizeof (canonical),
+			pES->response_list[responseIndex].response_text.pStr);
 
 	AiConv_ClearCaptured ();
 	AiConv_SuppressPhrases (TRUE);
@@ -1899,7 +1910,7 @@ AiSpeakDispatched (ENCOUNTER_STATE *pES, BYTE responseIndex,
 	 * happening, having already seen "(transmitting...)" come and go. */
 	aiWaitTicks = 0;
 
-	if (AiConv_Narrate (playerInput, authored, &narrated))
+	if (AiConv_Narrate (playerInput, canonical, authored, &narrated))
 	{
 		AiLogLong ("narrated as", narrated.spokenText);
 		AiSpeakGenerated (narrated.spokenText, narrated.audioClip);

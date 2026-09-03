@@ -330,6 +330,11 @@ class NarrateRequest:
     session: SessionRef
     player_input: str
     authored_text: str
+    # The authored line the encounter took the player to have said. Free text
+    # is matched to the nearest exported action, so authored_text is an answer
+    # to THIS rather than to what was typed, and the difference between the
+    # two is what must not be attributed back to the captain.
+    canonical_input: str = ""
     spoken_refs: tuple[int, ...] = ()
     state: Mapping[str, int] = field(default_factory=dict)
     game_date: date = GAME_START
@@ -357,6 +362,7 @@ class NarrateRequest:
             session=SessionRef.from_json(_session_of(raw)),
             player_input=player_input,
             authored_text=authored,
+            canonical_input=str(raw.get("canonical_input", "")).strip(),
             spoken_refs=tuple(
                 int(r) for r in raw.get("spoken_refs", ()) if isinstance(r, int)
             ),

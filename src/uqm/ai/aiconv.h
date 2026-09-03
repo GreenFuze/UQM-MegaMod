@@ -128,8 +128,8 @@ BOOLEAN AiConv_Converse (const char *playerInput, const AI_ACTION *actions,
  * Returns FALSE on any failure, in which case the caller must speak the
  * authored text verbatim: the game's own words are always a correct answer,
  * and only the phrasing is lost. */
-BOOLEAN AiConv_Narrate (const char *playerInput, const char *authoredText,
-		AI_REPLY *reply);
+BOOLEAN AiConv_Narrate (const char *playerInput, const char *canonicalInput,
+		const char *authoredText, AI_REPLY *reply);
 
 /* While suppressed, NPCPhrase() speaks nothing and hands its text to
  * AiConv_CaptureText instead.
