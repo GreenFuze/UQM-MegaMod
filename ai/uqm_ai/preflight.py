@@ -115,9 +115,10 @@ class Preflight:
         return found
 
     def _check_live(self) -> list[Problem]:
-        """Make one real request. This is the only check that catches an
-        expired login or an untrusted working directory, because both look
-        perfectly healthy until something is actually asked of the CLI."""
+        """Make one real request. This is the only check that catches a
+        rejected key, an exhausted balance or an untrusted working directory,
+        because all three look perfectly healthy until something is actually
+        asked."""
         import anyio
 
         from .providers.claude import ClaudeProvider
@@ -150,12 +151,13 @@ class Preflight:
     @staticmethod
     def _live_fix() -> str:
         return (
-            "if it says you are not signed in: run 'claude' in a terminal, "
-            "type /login, and finish sign-in in the browser - simply starting "
-            "the CLI does not renew an expired session. If it asks about "
-            "trusting a folder, answer yes for "
+            "set ANTHROPIC_API_KEY to a valid key from "
+            "https://console.anthropic.com/settings/keys and make sure the "
+            "account has credit; conversation is billed to your own API "
+            "account. If it asks about trusting a folder, answer yes for "
             + str(Path.cwd())
-            + ". The CLI can be asked neither of these when the game starts it."
+            + " - the CLI cannot be asked that when the game starts it. "
+            "Play without AI using --no-ai."
         )
 
 
