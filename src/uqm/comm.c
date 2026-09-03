@@ -891,6 +891,7 @@ typedef struct talking_state
 	COUNT waitTrack;
 	bool rewind;
 	BOOLEAN reported;
+	BOOLEAN aiHeld;
 	bool seeking;
 	bool ended;
 
@@ -1015,11 +1016,30 @@ DoTalkSegue (TALKING_STATE *pTS)
 			pTS->ended = true;
 			return FALSE;
 		}
-		else if (PauseSubtitles (next_page))
+		/* The second test holds the FINAL page of a generated line. Every
+		 * other page is held when the next one starts, but nothing starts
+		 * after the last, so without this it would flash by in the one
+		 * second of carrier audio it was given. */
+		else if (PauseSubtitles (next_page)
+				|| (aiTextPaced && !curTrack && !pTS->aiHeld
+					&& SubtitleText.pStr != NULL))
 		{
 			/* I would like to NOT count ellipses but whatever */
-			DWORD delay = RecalculateDelay (strlen (SubtitleText.pStr), FALSE);
+			DWORD delay;
 			BYTE read_speed = speed_array[GLOBAL (glob_flags) & READ_SPEED_MASK];
+
+			if (aiTextPaced)
+			{	/* Generated text is given a flat, readable dwell instead of
+				 * a reading-speed estimate: the words are not the borrowed
+				 * clip's words, so nothing about it can time them. Right or
+				 * Enter pages on, so erring long costs the player nothing. */
+				delay = (DWORD)ONE_SECOND
+						* (AI_PAGE_DWELL - AI_PAGE_LEAD) / 1000;
+				if (!curTrack)
+					pTS->aiHeld = TRUE;
+			}
+			else
+				delay = RecalculateDelay (strlen (SubtitleText.pStr), FALSE);
 
 			if (delay > 0 || read_speed == VERY_SLOW)
 			{
@@ -1776,7 +1796,12 @@ AiSpeakGenerated (const char *text, const char *clip)
 	StopTrack ();
 	ClearSubtitles ();
 	TalkingFinished = FALSE;
+
+	/* Set around this one call only, so no authored line is ever paced as
+	 * generated text. */
+	SetTrackAiPacing (aiTextPaced);
 	SpliceTrack (track, (UNICODE *)text, NULL, NULL);
+	SetTrackAiPacing (FALSE);
 }
 
 /* Copies whatever the encounter currently has on offer into the wire form.

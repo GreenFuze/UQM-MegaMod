@@ -32,6 +32,7 @@
 
 static int track_count;       // total number of tracks
 static int no_page_break;     // set when combining several tracks into one
+static int ai_paced;          // set while splicing a generated line
 
 // The one and only sample we play. Track switching is done by modifying
 // this sample while it is playing. StreamDecoderTaskFunc() picks up the
@@ -350,7 +351,14 @@ SplitSubPages (UNICODE *text, UNICODE *pages[], sint32 timestamp[], int size)
 		if (aft_ellips)
 			strcpy (pages[page] + lead_ellips + pos, "...");
 
-		if (optSmoothScroll == OPT_PC && !usingSpeech
+		if (ai_paced)
+		{	/* A generated line borrows a clip that says something else, so
+			 * its length says nothing about how long these words take to
+			 * read. Every page gets the same small slice; the dwell is held
+			 * by the caller, off the audio clock. */
+			timestamp[page] = AI_PAGE_LEAD;
+		}
+		else if (optSmoothScroll == OPT_PC && !usingSpeech
 				&& (LOBYTE (GLOBAL (CurrentActivity)) != WON_LAST_BATTLE))
 		{
 			timestamp[page] =
@@ -439,6 +447,16 @@ SpliceMultiTrack (UNICODE *TrackNames[], UNICODE *TrackText)
 	no_page_break = 1;
 }
 
+/* Splice the next line as generated text rather than as a recording.
+ *
+ * Set immediately before the SpliceTrack that carries a generated line and
+ * cleared immediately after, so nothing authored is ever paced this way. */
+void
+SetTrackAiPacing (BOOLEAN paced)
+{
+	ai_paced = paced ? 1 : 0;
+}
+
 // XXX: This code and the entire trackplayer are begging to be overhauled
 void
 SpliceTrack (UNICODE *TrackName, UNICODE *TrackText, UNICODE *TimeStamp, CallbackFunction cb)
@@ -479,8 +497,12 @@ SpliceTrack (UNICODE *TrackName, UNICODE *TrackText, UNICODE *TimeStamp, Callbac
 			return;
 		}
 		// The last page's stamp is a suggested value. The track should
-		// actually play to the end.
-		time_stamps[num_pages - 1] = -time_stamps[num_pages - 1];
+		// actually play to the end - but not for a generated line, whose
+		// carrier is a borrowed recording many times longer than the words
+		// it is carrying. Playing that out leaves the final page sitting on
+		// screen long after the character has finished speaking.
+		if (!ai_paced)
+			time_stamps[num_pages - 1] = -time_stamps[num_pages - 1];
 
 		// Add the first piece to the last subtitle page
 		slen1 = strlen (last_sub->text);
@@ -534,8 +556,12 @@ SpliceTrack (UNICODE *TrackName, UNICODE *TrackText, UNICODE *TimeStamp, Callbac
 			return;
 		}
 		// The last page's stamp is a suggested value. The track should
-		// actually play to the end.
-		time_stamps[num_pages - 1] = -time_stamps[num_pages - 1];
+		// actually play to the end - but not for a generated line, whose
+		// carrier is a borrowed recording many times longer than the words
+		// it is carrying. Playing that out leaves the final page sitting on
+		// screen long after the character has finished speaking.
+		if (!ai_paced)
+			time_stamps[num_pages - 1] = -time_stamps[num_pages - 1];
 
 		if (no_page_break && track_count)
 		{

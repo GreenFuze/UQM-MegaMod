@@ -63,6 +63,19 @@ extern SUBTITLE_REF GetFirstTrackSubtitle (void);
 extern SUBTITLE_REF GetNextTrackSubtitle (SUBTITLE_REF LastRef);
 extern const UNICODE *GetTrackSubtitleText (SUBTITLE_REF SubRef);
 
+/* Pacing for a generated line, which has no recording of its own.
+ *
+ * An authored line is paced by its own clip, because the clip IS the line.
+ * A generated one borrows somebody else's, so its pages must not be timed by
+ * it: the borrowed audio only has to last long enough to carry the pages,
+ * and the dwell is held by the caller instead. Keeping the audio cost per
+ * page down to AI_PAGE_LEAD is what makes this work for every character -
+ * the longest clip the Zoq-Fot-Pik have to lend is under 20 seconds. */
+#define AI_PAGE_LEAD    1000   /* audio consumed per page, ms */
+#define AI_PAGE_DWELL  10000   /* how long a page stays up, ms */
+
+extern void SetTrackAiPacing (BOOLEAN paced);
+
 extern const UNICODE *GetTrackSubtitle (void);
 extern COUNT GetSubtitleNumberByTrack (COUNT track);
 extern DWORD RecalculateDelay (DWORD numChars, BOOLEAN talk);
