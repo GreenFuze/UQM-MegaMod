@@ -430,11 +430,26 @@ class ClaudeProvider(LLMProvider):
             "even when the words differ completely."
         )
         lines.append(
+            "But TONE ONLY DECIDES BETWEEN LINES THAT ASSERT NOTHING. A listed "
+            "line is spoken AS THE CAPTAIN, in his own voice, and every claim "
+            "in it becomes something he has just told you - you then answer "
+            "the claim, and he is left having said a thing he never said. So "
+            "a line that asserts something specific about him - who he is, "
+            "where he came from, what he has done, a mission, a place, a name "
+            "- may be matched ONLY if the captain actually said that thing. "
+            "If he made a speech about fighting the Ur-Quan and the line has "
+            "him claiming a survey of some particular star, that is not what "
+            "he said: choose null and simply talk to him. Lines that ASK, "
+            "acknowledge or agree assert nothing about him, and those are the "
+            "ones tone is for."
+        )
+        lines.append(
             "IMPORTANT - the conversation only moves forward when you pick a "
             "ref. If you keep choosing null, the captain is stuck repeating "
             "themselves and nothing further ever becomes possible. For the "
             "ordinary back-and-forth lines (those not marked as ending the "
-            "conversation), lean towards picking the closest reasonable "
+            "conversation, and that put no claim in the captain's mouth), "
+            "lean towards picking the closest reasonable "
             "match so things progress. Precision matters far more for the "
             "lines that end the conversation - only pick one of those if the "
             "captain clearly means it."

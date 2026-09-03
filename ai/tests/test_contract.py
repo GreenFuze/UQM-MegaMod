@@ -642,6 +642,48 @@ class TestJsonSchemaIsCheckedAndRetried:
         assert len(calls) == _MAX_JSON_ATTEMPTS == 3
 
 
+class TestALineIsSpokenAsTheCaptain:
+    """A listed line must not put a claim in the captain's mouth.
+
+    Seen in play against Commander Hayes. Two lines were on offer, both
+    same-node, so neither was marked consequential and the "lean towards
+    progress" rule applied. The captain had made a speech about the Alliance
+    of Free Stars needing crew and ships; the model matched the OTHER line -
+    "we are the survivors of a Star Control science research team to the Vela
+    star system" - and the encounter answered the cover story, so Hayes
+    caught the captain in a lie the player had never told. The guard existed
+    but was keyed on irreversibility, and the harm here is misattribution.
+    """
+
+    def test_the_assertion_rule_is_stated(self) -> None:
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        prompt = ClaudeProvider._build_user_prompt(
+            make_request("We are the Alliance of Free Stars.", ["join_us"])
+        )
+        assert "ASSERT NOTHING" in prompt
+        assert "spoken AS THE CAPTAIN" in prompt
+
+    def test_tone_matching_is_scoped_to_lines_that_assert_nothing(self) -> None:
+        """Tone alone must not reach a line carrying a claim."""
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        prompt = ClaudeProvider._build_user_prompt(
+            make_request("Hello there.", ["join_us"])
+        )
+        tone = prompt.index("match on TONE")
+        scope = prompt.index("TONE ONLY DECIDES BETWEEN LINES THAT ASSERT NOTHING")
+        assert scope > tone, "the limit must follow the rule it limits"
+
+    def test_progress_pressure_excludes_lines_with_claims(self) -> None:
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        prompt = ClaudeProvider._build_user_prompt(
+            make_request("Hello there.", ["join_us"])
+        )
+        assert "put no claim in the captain's mouth" in prompt
+
+
 class TestPromptDoesNotFightTheContract:
     """The system prompt must not issue a second, conflicting "reply with"."""
 
