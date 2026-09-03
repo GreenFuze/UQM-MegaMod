@@ -18,6 +18,7 @@ import re
 
 import anyio
 
+from .. import gamelog
 from ..protocol import ConverseRequest, ConverseResponse, NarrateRequest
 from .base import LLMProvider, ProviderError
 
@@ -99,6 +100,108 @@ def _salvage(text: str):
     return None
 
 
+# How many times the model may be asked for the object before giving up: the
+# first attempt plus two corrections.
+_MAX_JSON_ATTEMPTS = 3
+
+# The reply contract as types rather than prose, so a reply can be CHECKED
+# against it instead of hoped about. Each entry is the wording used to tell
+# the model what the field should have been.
+_SCHEMA = {
+    "matches_ref": "an integer ref, or null",
+    "willing": "true or false",
+    "promises_action": "true or false",
+    "spoken_text": "a non-empty string",
+    "remember": "a short string, or null",
+}
+
+
+def _body(raw: str) -> str:
+    """The reply text with any code fence stripped."""
+    text = (raw or "").strip()
+    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
+    return fenced.group(1).strip() if fenced else text
+
+
+def _schema_errors(payload: dict) -> tuple[str, ...]:
+    """Every way this object fails the contract, named individually.
+
+    Reported per field rather than as one verdict, because the correction is
+    sent back to the model and a specific fault is far likelier to be fixed
+    than "your JSON was wrong".
+    """
+    problems = []
+
+    for field, expected in _SCHEMA.items():
+        if field not in payload:
+            problems.append(f"{field} was missing; it must be {expected}")
+            continue
+
+        value = payload[field]
+        if field in ("willing", "promises_action"):
+            # Checked before the int fields: in Python a bool IS an int, so
+            # testing the other way round lets true through as a ref.
+            ok = isinstance(value, bool)
+        elif field == "matches_ref":
+            ok = (
+                value is None
+                or (isinstance(value, int) and not isinstance(value, bool))
+                or (isinstance(value, str) and value.isdigit())
+            )
+        elif field == "spoken_text":
+            ok = isinstance(value, str) and value.strip() != ""
+        else:
+            ok = value is None or isinstance(value, str)
+
+        if not ok:
+            problems.append(f"{field} was {value!r}; it must be {expected}")
+
+    return tuple(problems)
+
+
+def _check(raw: str) -> tuple[dict | None, tuple[str, ...]]:
+    """Parse a reply and measure it against the contract.
+
+    Returns the object and what is wrong with it. No problems means it can be
+    used; problems mean it is worth one more round trip.
+
+    Genuine prose - no JSON attempted at all - reports NO problems, because
+    that path already degrades safely to plain conversation and re-asking
+    would spend two model calls to arrive back where it started.
+    """
+    text = _body(raw)
+    if not text:
+        return None, ("the reply was empty",)
+
+    try:
+        payload = json.loads(text)
+        if not isinstance(payload, dict):
+            raise ValueError("not an object")
+    except (json.JSONDecodeError, ValueError):
+        payload = _salvage(text)
+
+    if payload is None:
+        if _looks_like_json(text):
+            return None, (
+                "the reply was not valid JSON and could not be parsed",
+            )
+        return None, ()
+
+    return payload, _schema_errors(payload)
+
+
+def _correction(problems: tuple[str, ...]) -> str:
+    """What to send back so the model can fix its own reply."""
+    faults = "\n".join(f"- {problem}" for problem in problems)
+    return (
+        (chr(10) * 2)
+        + "Your previous reply did not fit the required JSON object:\n"
+        + faults
+        + "\nSend the whole object again, correctly this time: one JSON "
+        "object, every field present, no prose around it and no code fence."
+    )
+
+
 class ClaudeProvider(LLMProvider):
     """Single-turn completion through the Claude Agent SDK."""
 
@@ -118,10 +221,28 @@ class ClaudeProvider(LLMProvider):
     def generate(self, request: ConverseRequest, system_prompt: str) -> ConverseResponse:
         user_prompt = self._build_user_prompt(request)
 
-        try:
-            raw = anyio.run(self._complete, system_prompt, user_prompt)
-        except Exception as exc:  # noqa: BLE001 - surfaced to the game as an error
-            raise ProviderError(self._describe(exc, self._last_result)) from exc
+        # A JSON object was asked for, so the answer is checked against the
+        # contract before anything is done with it, and a reply that does not
+        # fit goes back with the exact fault named. The game SPEAKS whatever
+        # arrives here, so the two outcomes of giving up are a lost turn or a
+        # JSON blob in the character's mouth - both worse than another round
+        # trip. Two corrections, then take what we have.
+        prompt = user_prompt
+        for attempt in range(_MAX_JSON_ATTEMPTS):
+            try:
+                raw = anyio.run(self._complete, system_prompt, prompt)
+            except Exception as exc:  # noqa: BLE001 - surfaced as an error
+                raise ProviderError(self._describe(exc, self._last_result)) from exc
+
+            problems = _check(raw)[1]
+            if not problems:
+                break
+
+            gamelog.emit(
+                f"claude: malformed reply on attempt {attempt + 1} of "
+                f"{_MAX_JSON_ATTEMPTS}: {'; '.join(problems)}"
+            )
+            prompt = user_prompt + _correction(problems)
 
         response, promises = self._parse(raw, request)
 

@@ -492,6 +492,156 @@ class TestNeverSpeakJson:
         assert response.spoken_text == "Hello there."
 
 
+class TestJsonSchemaIsCheckedAndRetried:
+    """A malformed object is worth another round trip, not a lost turn.
+
+    The model is asked for a JSON object, so the object is checked against
+    the contract field by field. When it does not fit, the specific fault is
+    named and sent back - twice, if need be - because the game speaks
+    whatever finally arrives and both ways of giving up are worse than
+    asking again. Seen in play: "claude returned unparseable JSON" reached
+    the player as Hayes's own line.
+    """
+
+    @staticmethod
+    def _good():
+        return ('{"matches_ref": null, "willing": false, "promises_action":'
+                ' false, "spoken_text": "Hello there.", "remember": null}')
+
+    def test_a_good_object_has_no_problems(self) -> None:
+        from uqm_ai.providers.claude import _check
+
+        payload, problems = _check(self._good())
+        assert problems == ()
+        assert payload["spoken_text"] == "Hello there."
+
+    def test_unparseable_json_is_a_problem(self) -> None:
+        from uqm_ai.providers.claude import _check
+
+        _, problems = _check('{"spoken_text": "hi", "willing": true,}')
+        assert problems and "not valid JSON" in problems[0]
+
+    def test_prose_is_not_a_problem(self) -> None:
+        """Prose already degrades safely; re-asking would spend two calls."""
+        from uqm_ai.providers.claude import _check
+
+        payload, problems = _check("Out there is where the monsters are!")
+        assert payload is None
+        assert problems == ()
+
+    def test_each_bad_field_is_named_separately(self) -> None:
+        from uqm_ai.providers.claude import _check
+
+        _, problems = _check('{"matches_ref": "soon", "willing": "yes",'
+                             ' "promises_action": false, "spoken_text": "",'
+                             ' "remember": null}')
+        named = " ".join(problems)
+        assert "matches_ref" in named
+        assert "willing" in named
+        assert "spoken_text" in named
+        assert "promises_action" not in named
+
+    def test_a_missing_field_is_reported(self) -> None:
+        from uqm_ai.providers.claude import _check
+
+        _, problems = _check('{"spoken_text": "Hello."}')
+        assert any("matches_ref was missing" in p for p in problems)
+        assert any("willing was missing" in p for p in problems)
+
+    def test_true_is_not_accepted_as_a_ref(self) -> None:
+        """In Python a bool IS an int, so the order of the checks matters."""
+        from uqm_ai.providers.claude import _check
+
+        _, problems = _check('{"matches_ref": true, "willing": true,'
+                             ' "promises_action": false, "spoken_text": "Hi.",'
+                             ' "remember": null}')
+        assert any("matches_ref" in p for p in problems)
+
+    def test_a_digit_string_ref_is_tolerated(self) -> None:
+        """_parse already coerces it, so it is not worth a round trip."""
+        from uqm_ai.providers.claude import _check
+
+        _, problems = _check('{"matches_ref": "66", "willing": true,'
+                             ' "promises_action": false, "spoken_text": "Aye.",'
+                             ' "remember": null}')
+        assert problems == ()
+
+    def test_a_fenced_object_is_accepted(self) -> None:
+        from uqm_ai.providers.claude import _check
+
+        fence = chr(96) * 3
+        _, problems = _check(fence + "json\n" + self._good() + "\n" + fence)
+        assert problems == ()
+
+    def test_the_correction_names_the_faults(self) -> None:
+        from uqm_ai.providers.claude import _correction
+
+        text = _correction(("willing was 'yes'; it must be true or false",))
+        assert "willing was 'yes'" in text
+        assert "again" in text.lower()
+
+    def test_the_model_is_asked_again_and_the_fix_is_used(self) -> None:
+        """The whole loop: bad reply, correction sent, good reply used."""
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        prompts = []
+        replies = iter(['{"spoken_text": "hi", "willing": true,}', self._good()])
+
+        provider = ClaudeProvider.__new__(ClaudeProvider)
+        provider._model = None
+        provider._timeout_s = 1.0
+        provider._last_result = ""
+
+        def fake_run(_fn, _system, prompt):
+            prompts.append(prompt)
+            return next(replies)
+
+        import uqm_ai.providers.claude as mod
+        original = mod.anyio.run
+        mod.anyio.run = fake_run
+        try:
+            response = provider.generate(
+                make_request("Tell me about the Sa-Matra", ["join_us"]),
+                "system",
+            )
+        finally:
+            mod.anyio.run = original
+
+        assert len(prompts) == 2, "the model should have been asked again"
+        assert "not valid JSON" in prompts[1]
+        assert response.spoken_text == "Hello there."
+
+    def test_it_gives_up_after_two_corrections(self) -> None:
+        """Three calls in total, then the existing safe handling takes over."""
+        from uqm_ai.providers.base import ProviderError
+        from uqm_ai.providers.claude import ClaudeProvider, _MAX_JSON_ATTEMPTS
+
+        calls = []
+
+        provider = ClaudeProvider.__new__(ClaudeProvider)
+        provider._model = None
+        provider._timeout_s = 1.0
+        provider._last_result = ""
+
+        def fake_run(_fn, _system, prompt):
+            calls.append(prompt)
+            return '{"spoken_text": "hi", "willing": true,}'
+
+        import uqm_ai.providers.claude as mod
+        original = mod.anyio.run
+        mod.anyio.run = fake_run
+        try:
+            with pytest.raises(ProviderError):
+                provider.generate(
+                    make_request("Tell me about the Sa-Matra", ["join_us"]),
+                    "system",
+                )
+        finally:
+            mod.anyio.run = original
+
+        assert len(calls) == _MAX_JSON_ATTEMPTS == 3
+
+
 class TestPromptDoesNotFightTheContract:
     """The system prompt must not issue a second, conflicting "reply with"."""
 
