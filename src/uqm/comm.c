@@ -890,6 +890,7 @@ typedef struct talking_state
 	TimeCount NextTime;  // framerate control
 	COUNT waitTrack;
 	bool rewind;
+	BOOLEAN reported;
 	bool seeking;
 	bool ended;
 
@@ -907,6 +908,11 @@ typedef struct talking_state
  * branch for generated text while leaving every authored line exactly as it
  * was. */
 static BOOLEAN aiTextPaced = FALSE;
+
+/* Speech is muted while a borrowed carrier clip plays under generated text,
+ * so the character is not heard saying words that are not the ones on screen.
+ * Restored when the encounter ends, or when real synthesised speech arrives. */
+static BOOLEAN aiSpeechMuted = FALSE;
 
 /* The last generated line, so it can be shown again on request. */
 static char aiLastSpoken[AI_MAX_TEXT] = "";
@@ -1075,6 +1081,14 @@ DoTalkSegue (TALKING_STATE *pTS)
 	UpdateSpeechGraphics ();
 	FadePlayerUI ();
 	
+	if (aiTextPaced && !pTS->reported)
+	{	/* Once per segue. Says whether the reading-time branch was reached at
+		 * all, and whether the borrowed track is still alive - the delay only
+		 * holds a page while it is, because the segue ends on !curTrack. */
+		pTS->reported = TRUE;
+		log_add (log_Info, "AI: text-paced segue, curTrack=%u", curTrack);
+	}
+
 	pTS->ended = !pTS->seeking && !curTrack;
 
 	SleepThreadUntil (pTS->NextTime);
@@ -1678,14 +1692,29 @@ AiSpeakGenerated (const char *text, const char *clip)
 	{	/* Synthesised speech: the clip IS this line, so let it set the pace. */
 		log_add (log_Debug, "AI: speaking with generated clip %s", clip);
 		aiTextPaced = FALSE;
+		if (aiSpeechMuted)
+		{	/* Synthesised speech IS this line, so it must be audible. */
+			aiSpeechMuted = FALSE;
+			SetSpeechVolume (speechVolumeScale);
+		}
 		track = (UNICODE *)clip;
 	}
 	else
 	{	/* No recording of these words exists, so a clip is borrowed purely to
 		 * hang the subtitles on - SpliceTrack attaches text to decoded audio
 		 * and has no text-only path. Its LENGTH must not decide how long the
-		 * words stay up, so the line is paced by reading time instead. */
+		 * words stay up, so the line is paced by reading time instead.
+		 *
+		 * And it must not be HEARD: the borrowed clip is a real recording of
+		 * the character saying something else, so playing it under generated
+		 * text has them audibly say the wrong words. Speech is muted for the
+		 * duration and restored when the encounter ends. */
 		aiTextPaced = TRUE;
+		if (!aiSpeechMuted)
+		{
+			aiSpeechMuted = TRUE;
+			SetSpeechVolume (0.0f);
+		}
 		track = GetStringSoundClip (SetAbsStringTableIndex (
 				CommData.ConversationPhrases, 0));
 		if (track == NULL)
@@ -2462,6 +2491,12 @@ InitCommunication (CONVERSATION which_comm)
 	aiLastSpoken[0] = '\0';
 	aiLastClip[0] = '\0';
 	aiTextPaced = FALSE;
+
+	if (aiSpeechMuted)
+	{	/* Leaving speech muted would silence the whole game. */
+		aiSpeechMuted = FALSE;
+		SetSpeechVolume (speechVolumeScale);
+	}
 
 
 	if (LastActivity & CHECK_LOAD)
