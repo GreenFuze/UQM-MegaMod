@@ -1663,6 +1663,55 @@ AiOnWait (void)
 	++aiWaitTicks;
 }
 
+/* The clip a generated line borrows to hang its subtitles on.
+ *
+ * SpliceTrack gives every subtitle page its own slice of the carrier, walking
+ * an offset forward through the file as it goes. Once that offset passes the
+ * end of the recording each remaining page gets an empty decoder: the pages
+ * flash by faster than anyone can read them, the track runs out, and the
+ * segue ends on !curTrack with most of the line never shown.
+ *
+ * So the carrier has to be LONGER than the line it carries. Borrowing the
+ * clip at index 0 made that a matter of luck - whatever the character happens
+ * to say first. It is 56s for the Spathi, which is the only reason Fwiffo
+ * always read correctly, and 1.15s for the Commander, who was truncated on
+ * nearly every reply.
+ *
+ * The longest clip is the one wanted, and a recording's length is set by how
+ * much text it recites, so the longest phrase names it. That is measured
+ * rather than assumed: for the Commander, the Spathi and the starbase alike
+ * the longest phrase is exactly the longest clip - 90s, 131s and 121s against
+ * the 1.15s, 56.7s and 2.29s at index 0. */
+static UNICODE *
+AiCarrierClip (void)
+{
+	STRING phrases = CommData.ConversationPhrases;
+	COUNT count = GetStringTableCount (phrases);
+	UNICODE *best = NULL;
+	COUNT bestLen = 0;
+	COUNT i;
+
+	for (i = 0; i < count; ++i)
+	{
+		STRING phrase = SetAbsStringTableIndex (phrases, i);
+		UNICODE *clip = (UNICODE *)GetStringSoundClip (phrase);
+		COUNT len;
+
+		/* The player's own phrases carry no recording to borrow. */
+		if (clip == NULL || clip[0] == '\0')
+			continue;
+
+		len = GetStringLengthBin (phrase);
+		if (best == NULL || len > bestLen)
+		{
+			best = clip;
+			bestLen = len;
+		}
+	}
+
+	return best;
+}
+
 /* Speaks a generated line, with generated speech when there is any.
  *
  * The subtitle system is entirely track-based: SpliceTrack with a NULL track
@@ -1715,8 +1764,7 @@ AiSpeakGenerated (const char *text, const char *clip)
 			aiSpeechMuted = TRUE;
 			SetSpeechVolume (0.0f);
 		}
-		track = GetStringSoundClip (SetAbsStringTableIndex (
-				CommData.ConversationPhrases, 0));
+		track = AiCarrierClip ();
 		if (track == NULL)
 		{	/* No voice pack installed: nothing to hang subtitles on. */
 			log_add (log_Warning,
