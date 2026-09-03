@@ -1,9 +1,15 @@
-"""Claude provider, backed by the player's own subscription.
+"""Claude provider, billed to the player's own Anthropic API account.
 
 Uses the Claude Agent SDK with tools disabled and a single turn, so this is a
-plain completion rather than an agent loop. Authentication is whatever the
-Claude Code CLI already holds, which means the player's own subscription pays
-for their own play and no key is embedded anywhere.
+plain completion rather than an agent loop.
+
+Authentication is ANTHROPIC_API_KEY, and no key is embedded anywhere - each
+player supplies their own. It is deliberately NOT the signed-in Claude Code
+CLI, which is what this used to do: Anthropic's Agent SDK terms state that
+"unless previously approved, Anthropic does not allow third party developers
+to offer claude.ai login or rate limits for their products, including agents
+built on the Claude Agent SDK", and a mod that borrowed whoever was signed in
+would be doing precisely that.
 
 The model is asked for a small JSON object. Its output is never trusted:
 ResponseValidator re-checks the chosen action against what the encounter
@@ -14,6 +20,7 @@ failing the turn.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import anyio
@@ -257,6 +264,32 @@ class ClaudeProvider(LLMProvider):
             raise ProviderError(
                 "claude-agent-sdk is not installed; run: pip install claude-agent-sdk"
             )
+
+        # An API key, not the signed-in CLI. Anthropic's Agent SDK terms are
+        # explicit: "Unless previously approved, Anthropic does not allow
+        # third party developers to offer claude.ai login or rate limits for
+        # their products, including agents built on the Claude Agent SDK."
+        # A mod that leaned on whoever happened to be signed in would be
+        # doing exactly that, so the key is required and the player pays for
+        # their own play through the API.
+        #
+        # The override exists for working on this locally against your own
+        # account. It is personal use only - do not ship a build that sets
+        # it, and do not tell players to.
+        if not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get(
+            "UQMAI_ALLOW_SUBSCRIPTION_AUTH"
+        ):
+            raise ProviderError(
+                "ANTHROPIC_API_KEY is not set. Conversation is billed to your "
+                "own Anthropic API account: create a key at "
+                "https://console.anthropic.com/settings/keys and set it, e.g. "
+                "in PowerShell:\n\n"
+                "    $env:ANTHROPIC_API_KEY = 'sk-ant-...'\n\n"
+                "A Claude Pro/Max subscription cannot be used here: Anthropic "
+                "does not permit third-party products to authenticate with a "
+                "claude.ai login. Play without AI with --no-ai."
+            )
+
         self._model = model
         self._timeout_s = timeout_s
         self._last_result = ""
@@ -460,12 +493,13 @@ class ClaudeProvider(LLMProvider):
         detail = (last_result or "").strip()
         lowered = detail.lower()
 
-        if "authenticate" in lowered or "login" in lowered or "expired" in lowered:
+        if ("authenticate" in lowered or "login" in lowered
+                or "expired" in lowered or "api key" in lowered):
             return (
-                f"the Claude CLI is not signed in ({detail}). Run 'claude' in a "
-                "terminal, type /login, and complete sign-in in the browser. "
-                "Starting the CLI alone does not re-authenticate an expired "
-                "session."
+                f"Anthropic rejected the credentials ({detail}). Check that "
+                "ANTHROPIC_API_KEY is set to a valid key from "
+                "https://console.anthropic.com/settings/keys and that the "
+                "account has credit. Play without AI with --no-ai."
             )
         if detail:
             return f"the Claude CLI failed: {detail}"
