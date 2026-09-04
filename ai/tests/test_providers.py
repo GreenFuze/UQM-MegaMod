@@ -10,6 +10,7 @@ therefore playing without an account, possible at all.
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 
 import pytest
@@ -177,3 +178,106 @@ class TestFailuresAreLegible:
             urllib.error.HTTPError("u", 404, "Not Found", {}, None)
         )
         assert "UQMAI_MODEL" in text
+
+
+class TestSettings:
+    """Configuration a player can set from a menu rather than a shell.
+
+    Asking someone to export environment variables before they can talk to an
+    alien loses most of them at the first step. The environment still wins
+    when it is set, so development and CI are unaffected.
+    """
+
+    @staticmethod
+    def _write(tmp_path, text):
+        path = tmp_path / "uqmai.toml"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def _clean(self, monkeypatch):
+        for var in ("UQMAI_PROVIDER", "UQMAI_MODEL", "UQMAI_BASE_URL",
+                    "UQMAI_VOICE", "UQMAI_API_KEY", "ANTHROPIC_API_KEY",
+                    "OPENAI_API_KEY", "UQMAI_ALLOW_SUBSCRIPTION_AUTH"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_defaults_without_a_file(self, tmp_path, monkeypatch):
+        from uqm_ai.settings import Settings
+
+        self._clean(monkeypatch)
+        settings = Settings(tmp_path / "absent.toml")
+        assert settings.exists is False
+        assert settings.provider == "claude"
+        assert settings.voice is False
+        assert settings.use_subscription is False
+
+    def test_the_file_is_read(self, tmp_path, monkeypatch):
+        from uqm_ai.settings import Settings
+
+        self._clean(monkeypatch)
+        path = self._write(tmp_path, 'provider = "local"\nmodel = "x"\nvoice = true\n')
+        settings = Settings(path)
+        assert settings.provider == "local"
+        assert settings.model == "x"
+        assert settings.voice is True
+
+    def test_the_environment_wins(self, tmp_path, monkeypatch):
+        """A variable set for one run must not need the file edited back."""
+        from uqm_ai.settings import Settings
+
+        self._clean(monkeypatch)
+        path = self._write(tmp_path, 'provider = "local"\n')
+        monkeypatch.setenv("UQMAI_PROVIDER", "openai")
+        assert Settings(path).provider == "openai"
+
+    def test_a_bad_provider_is_refused_not_ignored(self, tmp_path, monkeypatch):
+        from uqm_ai.settings import Settings
+
+        self._clean(monkeypatch)
+        path = self._write(tmp_path, 'provider = "gemini"\n')
+        with pytest.raises(ValueError):
+            Settings(path).provider
+
+    def test_malformed_toml_is_refused_not_ignored(self, tmp_path, monkeypatch):
+        """Falling back to defaults would look like the setting being ignored."""
+        from uqm_ai.settings import Settings
+
+        self._clean(monkeypatch)
+        path = self._write(tmp_path, 'provider = "local\n')
+        with pytest.raises(ValueError):
+            Settings(path)
+
+    def test_subscription_is_off_unless_asked_for(self, tmp_path, monkeypatch):
+        from uqm_ai.settings import Settings
+
+        self._clean(monkeypatch)
+        path = self._write(tmp_path, 'provider = "claude"\n')
+        assert Settings(path).use_subscription is False
+
+    def test_subscription_can_be_chosen(self, tmp_path, monkeypatch):
+        """Kept deliberately: it is how the author plays on their own machine."""
+        from uqm_ai.settings import Settings
+
+        self._clean(monkeypatch)
+        path = self._write(tmp_path, 'use_subscription = true\n')
+        assert Settings(path).use_subscription is True
+
+    def test_claude_accepts_the_subscription_route(self, monkeypatch):
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        self._clean(monkeypatch)
+        assert ClaudeProvider(allow_subscription=True).name == "claude"
+
+    def test_claude_refuses_with_no_credentials_at_all(self, monkeypatch):
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        self._clean(monkeypatch)
+        with pytest.raises(ProviderError):
+            ClaudeProvider()
+
+    def test_a_key_from_the_file_reaches_the_sdk(self, monkeypatch):
+        """The SDK reads the environment, so a file key has to land there."""
+        from uqm_ai.providers.claude import ClaudeProvider
+
+        self._clean(monkeypatch)
+        ClaudeProvider(api_key="sk-ant-fromfile")
+        assert os.environ["ANTHROPIC_API_KEY"] == "sk-ant-fromfile"

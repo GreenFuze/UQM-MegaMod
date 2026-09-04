@@ -62,7 +62,7 @@ class OpenAICompatProvider(ConversationProvider):
         self._timeout_s = timeout_s
         self._last_result = ""
 
-        self._key = api_key
+        self._key = api_key or None
         if self._key is None and key_var is not None:
             self._key = os.environ.get(key_var)
         if self._key is None:

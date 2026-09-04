@@ -16,6 +16,7 @@ from . import gamelog
 from .cast import Cast
 from .memory import MemoryStore
 from .preflight import Preflight, report
+from .settings import Settings
 from .providers.base import LLMProvider, ProviderError, TTSProvider
 from .providers.mock import MockProvider
 from .sidecar import Sidecar
@@ -138,19 +139,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # The game always asks for --provider claude (aiproc.c builds that command
-    # line), so this is how a player chooses a different backend: set it
-    # alongside the key, and no rebuild is involved.
-    chosen = os.environ.get("UQMAI_PROVIDER")
-    if chosen:
-        allowed = ("mock", "claude", "openai", "local")
-        if chosen not in allowed:
-            print(
-                f"[uqm-ai] UQMAI_PROVIDER={chosen!r} is not one of "
-                + ", ".join(allowed),
-                file=sys.stderr,
-            )
-            return 2
-        args.provider = chosen
+    # line), so the settings file and the environment are how a player picks
+    # anything else. No rebuild, and no need to know a flag exists.
+    try:
+        settings = Settings()
+        if settings.exists or os.environ.get("UQMAI_PROVIDER"):
+            args.provider = settings.provider
+    except ValueError as exc:
+        print(f"[uqm-ai] {exc}", file=sys.stderr)
+        return 2
+    # Voice too: the game only asks for it when started with --ai-voice, and
+    # a player who ticked it in setup should not also have to find the flag.
+    if settings.voice and args.tts == "none":
+        args.tts = "chatterbox"
+
+    gamelog.emit(f"settings: {settings.describe()}")
 
     # Resolving the cast reads the trees and every character file, so a
     # malformed condition or a flag the game does not have stops the sidecar
@@ -210,11 +213,20 @@ def main(argv: list[str] | None = None) -> int:
             if args.provider == "claude":
                 from .providers.claude import ClaudeProvider
 
-                provider = ClaudeProvider()
+                provider = ClaudeProvider(
+                    model=settings.model or None,
+                    api_key=settings.api_key("claude") or None,
+                    allow_subscription=settings.use_subscription,
+                )
             else:
                 from .providers.openai_compat import OpenAICompatProvider
 
-                provider = OpenAICompatProvider(preset=args.provider)
+                provider = OpenAICompatProvider(
+                    preset=args.provider,
+                    base_url=settings.base_url or None,
+                    model=settings.model or None,
+                    api_key=settings.api_key(args.provider) or None,
+                )
         except ProviderError as exc:
             print(f"[uqm-ai] {exc}", file=sys.stderr)
             return 3

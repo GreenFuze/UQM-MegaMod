@@ -7,7 +7,12 @@ free-text conversation. Instead of picking option 2 of 4, you type what you want
 say — and the character answers in their own voice, from what they actually know at
 that point in the story.
 
-Built on [UQM MegaMod](https://github.com/JHGuitarFreak/UQM-MegaMod). Powered by Claude.
+### Built on [**UQM MegaMod**](https://github.com/JHGuitarFreak/UQM-MegaMod) by JHGuitarFreak
+
+This is a fork of [github.com/JHGuitarFreak/UQM-MegaMod](https://github.com/JHGuitarFreak/UQM-MegaMod),
+which is itself a fork of [The Ur-Quan Masters](https://sc2.sourceforge.net/). MegaMod is
+where all the hard work lives - the HD remaster, the options, the decades of fixes. This
+fork changes exactly one thing about it. Powered by Claude.
 
 > Looking for MegaMod itself, and its own very long list of features? That readme is
 > preserved here as **[README-MegaMod.md](README-MegaMod.md)**. This fork changes one
@@ -84,13 +89,35 @@ Optional, for synthesised speech: several GB of `torch` + `chatterbox-tts`. Voic
 ```powershell
 git clone -b ai-edition https://github.com/GreenFuze/UQM-MegaMod.git uqm-megamod
 cd uqm-megamod
-.\install.ps1
+.\install.ps1     # once: prerequisites, content, build
+.\Play.ps1        # every time: configure and play
 ```
 
-`install.ps1` checks your prerequisites, clones the pinned content, creates the
-virtual environment the game looks for, builds, and then runs the sidecar's own
-preflight so a broken install tells you here rather than halfway through a
-conversation. It is safe to re-run — every step is skipped if already done.
+`install.ps1` does the one-time work: prerequisites, the pinned content, the virtual
+environment the game looks for, the build, and the sidecar's own preflight - so a broken
+install tells you here rather than halfway through a conversation. Safe to re-run; every
+step is skipped if already done.
+
+`Play.ps1` is the everyday one. It shows what is configured, what is missing and how to
+fix it, then lets you choose an AI, paste a key, turn voice on or off, install what is
+needed, test the connection, and play:
+
+```
+    AI     : Claude (API key)
+    Voice  : off (subtitles)
+    Status : ready
+
+    1. Choose which AI answers
+    2. Voice: turn ON
+    3. Install voice support (large download)
+    4. Install / repair the AI packages
+    5. Test the connection
+    6. Play
+```
+
+Settings are saved to `%APPDATA%\uqm-megamod\uqmai.toml`, beside the game's own
+configuration. **No environment variables are required** - though if you set one it still
+wins, so a one-off run never means editing a file and remembering to edit it back.
 
 ```powershell
 .\install.ps1 -WithVoice     # also install speech synthesis
@@ -126,21 +153,7 @@ ai\.venv\Scripts\python.exe -m pip install claude-agent-sdk pytest
 
 ## Running
 
-Pick a backend and give it credentials — once per session, or permanently in
-your environment:
-
-```powershell
-# Claude (the only one this has actually been tested with)
-$env:ANTHROPIC_API_KEY = 'sk-ant-...'
-
-# ...or OpenAI
-$env:UQMAI_PROVIDER = 'openai'; $env:OPENAI_API_KEY = 'sk-...'
-
-# ...or a local model: free, private, no account
-$env:UQMAI_PROVIDER = 'local'      # Ollama on localhost:11434
-```
-
-Then:
+Easiest is `.\Play.ps1`, which configures and launches. To start the game directly:
 
 ```powershell
 .\UrQuanMasters.exe                 # AI conversation, subtitles - the default
@@ -167,6 +180,10 @@ Set `UQMAI_PROVIDER` to one of:
 | `claude` *(default)* | Anthropic, via the Claude Agent SDK | `ANTHROPIC_API_KEY` | per token |
 | `openai` | OpenAI chat completions | `OPENAI_API_KEY` | per token |
 | `local` | Any OpenAI-compatible server on your machine — [Ollama](https://ollama.com), llama.cpp, LM Studio, vLLM | none | **free** |
+| `claude` + subscription | The Claude CLI you are signed in to | that sign-in | your existing plan |
+
+The last row is **personal use only** and is not a way to distribute this - see
+[Cost and licensing](#cost-and-licensing).
 
 Override the endpoint and model for any of them:
 
@@ -207,6 +224,13 @@ terms are explicit:
 
 OpenAI is the same story from the other side: ChatGPT Plus and Pro do not include API
 access or let you mint a key, so a Codex or ChatGPT login cannot drive this either.
+
+**On your own machine, for yourself, is a different question.** `Play.ps1` offers
+"Claude, with my subscription", which routes answers through the Claude CLI you are
+already signed in to. The word the terms turn on is *offer*: using the tool you already
+pay for, on your own account, is between you and Anthropic; shipping a build that points
+other people at theirs is what is forbidden. So it is never the default, it is labelled
+where it is offered, and a release must not enable it.
 
 Use of the Agent SDK is governed by Anthropic's
 [Commercial Terms of Service](https://www.anthropic.com/legal/commercial-terms) when it

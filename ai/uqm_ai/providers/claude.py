@@ -3,13 +3,19 @@
 Uses the Claude Agent SDK with tools disabled and a single turn, so this is a
 plain completion rather than an agent loop.
 
-Authentication is ANTHROPIC_API_KEY, and no key is embedded anywhere - each
-player supplies their own. It is deliberately NOT the signed-in Claude Code
-CLI, which is what this used to do: Anthropic's Agent SDK terms state that
-"unless previously approved, Anthropic does not allow third party developers
-to offer claude.ai login or rate limits for their products, including agents
-built on the Claude Agent SDK", and a mod that borrowed whoever was signed in
-would be doing precisely that.
+Authentication is ANTHROPIC_API_KEY by default, and no key is embedded - each
+player supplies their own.
+
+There is a second route, and it is deliberately not the default: with
+allow_subscription the signed-in Claude CLI answers instead, on whatever plan
+that account has. Anthropic's Agent SDK terms say that "unless previously
+approved, Anthropic does not allow third party developers to offer claude.ai
+login or rate limits for their products, including agents built on the Claude
+Agent SDK". OFFER is the operative word. Using the subscription you already
+pay for, on your own machine, is between you and your own account; shipping a
+build that points other people at theirs is what the terms forbid. So the
+setup menu offers it under your own name, marked personal use, and the
+distributed default is a key.
 
 Everything that is not specific to Anthropic - the prompts, the reply
 contract, the retries - lives in conversation.py and is shared with every
@@ -48,7 +54,9 @@ except ImportError:  # pragma: no cover - exercised only on installs without it
 class ClaudeProvider(ConversationProvider):
     """Single-turn completion through the Claude Agent SDK."""
 
-    def __init__(self, model: str | None = None, timeout_s: float = 60.0) -> None:
+    def __init__(self, model: str | None = None, timeout_s: float = 60.0,
+                 api_key: str | None = None,
+                 allow_subscription: bool = False) -> None:
         if not _SDK_AVAILABLE:
             raise ProviderError(
                 "claude-agent-sdk is not installed; run: pip install claude-agent-sdk"
@@ -65,9 +73,15 @@ class ClaudeProvider(ConversationProvider):
         # The override exists for working on this locally against your own
         # account. It is personal use only - do not ship a build that sets
         # it, and do not tell players to.
-        if not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get(
-            "UQMAI_ALLOW_SUBSCRIPTION_AUTH"
-        ):
+        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        allow_subscription = allow_subscription or bool(
+            os.environ.get("UQMAI_ALLOW_SUBSCRIPTION_AUTH")
+        )
+        if key:
+            # The SDK reads the environment, so a key from the settings file
+            # has to be put where it will be found.
+            os.environ["ANTHROPIC_API_KEY"] = key
+        elif not allow_subscription:
             raise ProviderError(
                 "ANTHROPIC_API_KEY is not set. Conversation is billed to your "
                 "own Anthropic API account: create a key at "
