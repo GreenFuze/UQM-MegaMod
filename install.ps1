@@ -226,6 +226,30 @@ if ($SkipBuild) {
     Write-Ok 'build succeeded'
 }
 
+# ---------------------------------------------------------------------------
+# 4b. The launcher
+# ---------------------------------------------------------------------------
+# Compiled with the C# compiler that ships inside Windows, so this needs no
+# SDK and the result needs no runtime: .NET Framework 4.x is present on every
+# Windows 10 and 11. That is the whole reason the player-facing tool is a
+# window rather than a script.
+Write-Step 'Building the setup launcher'
+$csc = Get-ChildItem `
+    'C:\Windows\Microsoft.NET\Framework644.0.30319\csc.exe', `
+    'C:\Windows\Microsoft.NET\Framework4.0.30319\csc.exe' `
+    -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($csc) {
+    & $csc.FullName /nologo /target:winexe /optimize+ `
+        /out:(Join-Path $RepoRoot 'UQMAI-Setup.exe') `
+        /reference:System.dll /reference:System.Drawing.dll `
+        /reference:System.Windows.Forms.dll `
+        (Join-Path $RepoRoot 'launcher\Launcher.cs')
+    if ($LASTEXITCODE -eq 0) { Write-Ok 'UQMAI-Setup.exe built' }
+    else { Write-Warn 'launcher build failed; configure by hand instead' }
+} else {
+    Write-Warn 'no in-box C# compiler found; skipping the launcher'
+}
+
 $exe = Join-Path $RepoRoot 'UrQuanMasters.exe'
 if (Test-Path $exe) { Write-Ok "game at $exe" }
 else { Write-Warn "UrQuanMasters.exe not found at $exe" }
@@ -265,6 +289,7 @@ if ($canRunLive) {
 
 # ---------------------------------------------------------------------------
 Write-Host "`nDone." -ForegroundColor Cyan
+Write-Host '  Run UQMAI-Setup.exe to choose an AI and play.' -ForegroundColor Cyan
 Write-Host @"
 
   Play with AI conversation (default):

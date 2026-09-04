@@ -86,34 +86,35 @@ Optional, for synthesised speech: several GB of `torch` + `chatterbox-tts`. Voic
 
 ## Install
 
+**Playing?** Download the release, unzip it, and double-click **`UQMAI-Setup.exe`**.
+It checks what is missing, installs it, lets you choose an AI and paste a key, and
+starts the game. There is no console and nothing to type.
+
+**Building it yourself?** That needs Visual Studio, so it is the developer path:
+
 ```powershell
 git clone -b ai-edition https://github.com/GreenFuze/UQM-MegaMod.git uqm-megamod
 cd uqm-megamod
-.\install.ps1     # once: prerequisites, content, build
-.\Play.ps1        # every time: configure and play
+.\install.ps1          # prerequisites, content, game, launcher
 ```
 
-`install.ps1` does the one-time work: prerequisites, the pinned content, the virtual
-environment the game looks for, the build, and the sidecar's own preflight - so a broken
-install tells you here rather than halfway through a conversation. Safe to re-run; every
-step is skipped if already done.
+`install.ps1` is re-runnable and skips anything already done. It also compiles the
+launcher, using the C# compiler that ships inside Windows - so the launcher needs no SDK
+to build and no runtime to run.
 
-`Play.ps1` is the everyday one. It shows what is configured, what is missing and how to
-fix it, then lets you choose an AI, paste a key, turn voice on or off, install what is
-needed, test the connection, and play:
+**`UQMAI-Setup.exe`** is what a player uses. It shows every prerequisite with a tick or a
+cross and what to do about it, installs the Python packages itself, and only then lets
+you pick a backend:
 
-```
-    AI     : Claude (API key)
-    Voice  : off (subtitles)
-    Status : ready
+- Claude, with an API key
+- Claude, with your subscription *(personal use only - see below)*
+- OpenAI, with an API key
+- A local model - free, private, nothing leaves the machine
+- No AI, play as plain MegaMod
 
-    1. Choose which AI answers
-    2. Voice: turn ON
-    3. Install voice support (large download)
-    4. Install / repair the AI packages
-    5. Test the connection
-    6. Play
-```
+...paste a key, choose a local model from a list with its download size and RAM needs,
+toggle voice (installing the large download only if you turn it on), test the connection
+with one real request, and press **Play**.
 
 Settings are saved to `%APPDATA%\uqm-megamod\uqmai.toml`, beside the game's own
 configuration. **No environment variables are required** - though if you set one it still
@@ -153,7 +154,7 @@ ai\.venv\Scripts\python.exe -m pip install claude-agent-sdk pytest
 
 ## Running
 
-Easiest is `.\Play.ps1`, which configures and launches. To start the game directly:
+Easiest is `UQMAI-Setup.exe`, which configures and launches. To start the game directly:
 
 ```powershell
 .\UrQuanMasters.exe                 # AI conversation, subtitles - the default
@@ -181,6 +182,23 @@ Set `UQMAI_PROVIDER` to one of:
 | `openai` | OpenAI chat completions | `OPENAI_API_KEY` | per token |
 | `local` | Any OpenAI-compatible server on your machine — [Ollama](https://ollama.com), llama.cpp, LM Studio, vLLM | none | **free** |
 | `claude` + subscription | The Claude CLI you are signed in to | that sign-in | your existing plan |
+
+### Which local model?
+
+The launcher offers these, with the download size that actually decides whether you try
+it. Install [Ollama](https://ollama.com), then `ollama pull <name>`:
+
+| Model | Download | RAM | Notes |
+|---|---|---|---|
+| `qwen2.5:7b` | ~4.7 GB | 8 GB | Good at holding to the reply format |
+| `llama3.1:8b` | ~4.7 GB | 8 GB | The usual baseline |
+| `mistral-nemo:12b` | ~7.1 GB | 12 GB | Wordier, more in character |
+| `qwen2.5:14b` | ~9.0 GB | 16 GB | Best of these if it fits |
+
+**These are suggestions, not measurements.** None has been played through — the sizes are
+the published ones and the notes are general reputation, not results from this game. A
+smaller model will be worse at staying in character and at picking the right response.
+The safety rule holds regardless: it is enforced in the game, not in the model.
 
 The last row is **personal use only** and is not a way to distribute this - see
 [Cost and licensing](#cost-and-licensing).
