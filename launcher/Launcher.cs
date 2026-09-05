@@ -126,13 +126,15 @@ namespace UqmAi
         Button btInstall, btTest, btPlay, btRecheck;
         ListView lvChecks;
 
-        // Local models worth suggesting, with the download size, because that
-        // is the number that decides whether someone tries this at all.
+        // Starting points, with the download size - the number that actually
+        // decides whether someone tries this. NOT rankings: none of these has
+        // been played through, so the notes say what they are (size, RAM) and
+        // not which is better, which would be a claim nobody has checked.
         static readonly string[] LocalModels = {
-            "qwen2.5:7b        (~4.7 GB, 8 GB RAM)  - good at following the reply format",
-            "llama3.1:8b       (~4.7 GB, 8 GB RAM)  - the usual baseline",
-            "mistral-nemo:12b  (~7.1 GB, 12 GB RAM) - wordier, more in-character",
-            "qwen2.5:14b       (~9.0 GB, 16 GB RAM) - best of these if it fits",
+            "qwen2.5:7b        (~4.7 GB download, 8 GB RAM)",
+            "llama3.1:8b       (~4.7 GB download, 8 GB RAM)",
+            "mistral-nemo:12b  (~7.1 GB download, 12 GB RAM)",
+            "qwen2.5:14b       (~9.0 GB download, 16 GB RAM)",
         };
 
         [STAThread]
@@ -330,7 +332,10 @@ namespace UqmAi
             if (rbLocal.Checked)
                 Log("A local model needs Ollama (https://ollama.com). Install it, "
                   + "then run:  ollama pull " + ModelName()
-                  + "   Only Claude has actually been playtested.");
+                  + "   The listed models are starting points, not "
+                  + "recommendations - none has been playtested here, and only "
+                  + "Claude has. A smaller model will be worse at staying in "
+                  + "character. It still cannot break your save.");
         }
 
         // The combo shows a description; the sidecar wants only the tag.
